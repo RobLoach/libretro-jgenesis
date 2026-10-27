@@ -22,8 +22,7 @@ use std::{ptr, slice};
 
 const LIBRARY_NAME: &CStr = c"jgenesis";
 const LIBRARY_VERSION: &CStr = c"0.14.1 (libretro 0.1.0)";
-const VALID_EXTENSIONS: &CStr =
-    c"sg|sms|gg|gen|md|bin|smd|32x|nes|sfc|smc|gb|gbc|gba|pce|cue|chd|m3u";
+const VALID_EXTENSIONS: &CStr = c"sg|sms|gg|gen|md|bin|smd|32x|nes|sfc|smc|gb|gbc|gba|pce|cue|chd|m3u";
 const FULLPATH_EXTENSIONS: &CStr = c"cue|chd|m3u";
 
 struct Game {

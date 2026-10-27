@@ -62,13 +62,11 @@ pub const RETRO_LOG_ERROR: c_int = 3;
 pub const RETRO_NUM_CORE_OPTION_VALUES_MAX: usize = 128;
 
 pub type RetroEnvironmentFn = unsafe extern "C" fn(cmd: c_uint, data: *mut c_void) -> bool;
-pub type RetroVideoRefreshFn =
-    unsafe extern "C" fn(data: *const c_void, width: c_uint, height: c_uint, pitch: usize);
+pub type RetroVideoRefreshFn = unsafe extern "C" fn(data: *const c_void, width: c_uint, height: c_uint, pitch: usize);
 pub type RetroAudioSampleFn = unsafe extern "C" fn(left: i16, right: i16);
 pub type RetroAudioSampleBatchFn = unsafe extern "C" fn(data: *const i16, frames: usize) -> usize;
 pub type RetroInputPollFn = unsafe extern "C" fn();
-pub type RetroInputStateFn =
-    unsafe extern "C" fn(port: c_uint, device: c_uint, index: c_uint, id: c_uint) -> i16;
+pub type RetroInputStateFn = unsafe extern "C" fn(port: c_uint, device: c_uint, index: c_uint, id: c_uint) -> i16;
 pub type RetroLogPrintfFn = unsafe extern "C" fn(level: c_int, fmt: *const c_char, ...);
 
 #[repr(C)]
@@ -194,8 +192,7 @@ pub type RetroGetEjectStateFn = unsafe extern "C" fn() -> bool;
 pub type RetroGetImageIndexFn = unsafe extern "C" fn() -> c_uint;
 pub type RetroSetImageIndexFn = unsafe extern "C" fn(index: c_uint) -> bool;
 pub type RetroGetNumImagesFn = unsafe extern "C" fn() -> c_uint;
-pub type RetroReplaceImageIndexFn =
-    unsafe extern "C" fn(index: c_uint, info: *const RetroGameInfo) -> bool;
+pub type RetroReplaceImageIndexFn = unsafe extern "C" fn(index: c_uint, info: *const RetroGameInfo) -> bool;
 pub type RetroAddImageIndexFn = unsafe extern "C" fn() -> bool;
 
 #[repr(C)]

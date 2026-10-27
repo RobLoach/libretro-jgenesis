@@ -1,6 +1,6 @@
 # Builds the jgenesis libretro core with cargo, using libretro platform names.
 #
-#   make -f Makefile.libretro                         # host platform
+#   make -f Makefile.libretro
 #   make -f Makefile.libretro platform=unix ARCH=aarch64
 #   make -f Makefile.libretro platform=win64
 #   make -f Makefile.libretro platform=osx ARCH=arm64

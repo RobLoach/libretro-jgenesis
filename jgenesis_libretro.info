@@ -71,4 +71,4 @@ needs_fullpath = "false"
 disk_control = "true"
 is_experimental = "true"
 
-description = "A multi-system emulator written in Rust, covering the Sega SG-1000, Master System, Game Gear, Genesis/Mega Drive, Sega CD, 32X, NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, PC Engine and PC Engine CD."
+description = "A multi-system emulator written in Rust, covering Sega SG-1000, Master System, Game Gear, Genesis/Mega Drive, Sega CD, 32X, NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, PC Engine and PC Engine CD."

@@ -1,17 +1,17 @@
 # libretro-jgenesis
 
-A [libretro](https://www.libretro.com/) core for [jgenesis](https://github.com/jsgroth/jgenesis) by [jsgroth](https://github.com/jsgroth), a cycle-accurate multi-system emulator written in Rust. It runs in RetroArch and other libretro frontends.
+A [libretro](https://www.libretro.com/) core for the [jgenesis](https://github.com/jsgroth/jgenesis) emulator, originally developed by [jsgroth](https://github.com/jsgroth).
 
 ## Systems
 
 | System | Extensions | Firmware |
 |---|---|---|
 | Sega Genesis / Mega Drive | `gen` `md` `bin` `smd` | None |
-| Sega CD / Mega CD | `cue` `chd` `m3u` | `bios_CD_U.bin`, `bios_CD_E.bin`, `bios_CD_J.bin` (matching the disc's region) |
-| Sega 32X, Sega CD 32X | `32x` `bin`, `cue` `chd` | 32X: None. Sega CD 32X: Sega CD BIOS |
+| Sega CD / Mega CD | `cue` `chd` `m3u` | `bios_CD_U.bin`, `bios_CD_E.bin`, `bios_CD_J.bin` |
+| Sega 32X, Sega CD 32X | `32x` `bin`, `cue` `chd` | Sega CD BIOS |
 | Master System, Game Gear, SG-1000 | `sms` `gg` `sg` | None |
 | NES / Famicom | `nes` | None |
-| SNES / Super Famicom | `sfc` `smc` | `dsp1.rom`–`dsp4.rom`, `st010.rom`, `st011.rom`, `st018.rom`, for games that use those chips |
+| SNES / Super Famicom | `sfc` `smc` | `dsp1.rom`–`dsp4.rom`, `st010.rom`, `st011.rom`, `st018.rom` |
 | Game Boy, Game Boy Color | `gb` `gbc` | None |
 | Game Boy Advance | `gba` `bin` | `gba_bios.bin` |
 | PC Engine / TurboGrafx-16 | `pce` | None |
@@ -39,7 +39,7 @@ Save states and rewind are supported. Save states are tied to the jgenesis versi
 
 All systems use the RetroPad. Genesis follows Genesis Plus GX's layout: Y/B/A are A/B/C, L/X/R are X/Y/Z, and Select is Mode. Each Genesis port can be set to a 6-button pad (the default), a 3-button pad, or nothing. PC Engine follows Beetle PCE's layout: A/B are I/II. The TurboTap core option enables 5 players.
 
-## Building
+## Development
 
 Requires Rust 1.99.1 or newer, pinned in `rust-toolchain.toml`, and a C compiler for the zstd library used to read CHD images.
 
@@ -78,10 +78,10 @@ PS2, PS3, GameCube, Wii, Wii U and Switch have no Rust target with a standard li
 
 jgenesis favors accuracy over speed. 32X, Sega CD, and SNES games with coprocessors need a reasonably fast CPU, and may not run at full speed on low-end Android devices or in the browser.
 
-## How it works
+### Background
 
 The jgenesis backend crates are used unmodified, as git dependencies pinned to a specific revision. The libretro API is a small hand-written FFI layer (`src/ffi.rs`); there's no bindgen dependency, so it cross-compiles without libclang. Every emulator implements jgenesis's `EmulatorTrait`, so one generic `Session<E>` (`src/session.rs`) handles video, audio, input, saves and save states for all systems. The GPU post-processing that standalone jgenesis does in shaders (GBC/GBA LCD color correction and frame blending) is reimplemented on the CPU (`src/frontend.rs`).
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). The same [license as jgenesis](https://github.com/jsgroth/jgenesis/blob/master/LICENSE).
+[GPL-3.0-or-later](LICENSE). Same as the [jgenesis license](https://github.com/jsgroth/jgenesis/blob/master/LICENSE).
