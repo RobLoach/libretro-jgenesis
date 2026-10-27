@@ -3,8 +3,6 @@
 //! Only the types, constants, and callbacks used by this core are declared. Layouts must match
 //! <https://github.com/libretro/libretro-common/blob/master/include/libretro.h> exactly.
 
-#![allow(dead_code)]
-
 use std::ffi::{c_char, c_int, c_uint, c_void};
 
 pub const RETRO_API_VERSION: c_uint = 1;
@@ -24,10 +22,6 @@ pub const RETRO_DEVICE_ID_JOYPAD_A: c_uint = 8;
 pub const RETRO_DEVICE_ID_JOYPAD_X: c_uint = 9;
 pub const RETRO_DEVICE_ID_JOYPAD_L: c_uint = 10;
 pub const RETRO_DEVICE_ID_JOYPAD_R: c_uint = 11;
-pub const RETRO_DEVICE_ID_JOYPAD_L2: c_uint = 12;
-pub const RETRO_DEVICE_ID_JOYPAD_R2: c_uint = 13;
-pub const RETRO_DEVICE_ID_JOYPAD_L3: c_uint = 14;
-pub const RETRO_DEVICE_ID_JOYPAD_R3: c_uint = 15;
 pub const RETRO_DEVICE_ID_JOYPAD_MASK: c_uint = 256;
 
 /// Subclass of `RETRO_DEVICE_JOYPAD`, used for e.g. "6-button" controller types.
@@ -55,7 +49,6 @@ pub const RETRO_ENVIRONMENT_SET_CONTROLLER_INFO: c_uint = 35;
 pub const RETRO_ENVIRONMENT_SET_GEOMETRY: c_uint = 37;
 pub const RETRO_ENVIRONMENT_GET_INPUT_BITMASKS: c_uint = 0x33 | RETRO_ENVIRONMENT_EXPERIMENTAL;
 pub const RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION: c_uint = 52;
-pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY: c_uint = 55;
 pub const RETRO_ENVIRONMENT_SET_CONTENT_INFO_OVERRIDE: c_uint = 65;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2: c_uint = 67;
 
