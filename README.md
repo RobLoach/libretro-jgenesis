@@ -1,10 +1,10 @@
 # libretro-jgenesis
 
-A [libretro](https://www.libretro.com/) core for [jgenesis](https://github.com/jsgroth/jgenesis), a cycle-accurate multi-system emulator written in Rust. It runs in RetroArch and other libretro frontends.
+A [libretro](https://www.libretro.com/) core for [jgenesis](https://github.com/jsgroth/jgenesis) by [jsgroth](https://github.com/jsgroth), a cycle-accurate multi-system emulator written in Rust. It runs in RetroArch and other libretro frontends.
 
-One core covers every system jgenesis emulates:
+## Systems
 
-| System | Extensions | Firmware (in the frontend's system directory) |
+| System | Extensions | Firmware |
 |---|---|---|
 | Sega Genesis / Mega Drive | `gen` `md` `bin` `smd` | — |
 | Sega CD / Mega CD | `cue` `chd` `m3u` | `bios_CD_U.bin`, `bios_CD_E.bin`, `bios_CD_J.bin` (matching the disc's region) |
@@ -17,15 +17,17 @@ One core covers every system jgenesis emulates:
 | PC Engine / TurboGrafx-16 | `pce` | — |
 | PC Engine CD / TurboGrafx-CD | `cue` `chd` | `syscard3.pce` |
 
-The console is detected from the file extension and contents: Genesis/32X/Sega CD headers, GBA headers for `.bin`, and Sega CD vs. PC Engine CD for disc images.
+The system is detected from the file extension and contents:
+- Genesis/32X/Sega CD headers
+- GBA headers for `.bin`
+- Sega CD vs. PC Engine CD for disc images
 
-## Using it
+## Usage
 
-1. Build the core (below), or download a build from the [Actions](../../actions) tab.
-2. Copy `jgenesis_libretro.so` / `.dll` / `.dylib` into RetroArch's `cores` directory and `jgenesis_libretro.info` into its `info` directory.
-3. Load content with *Load Core → jgenesis*.
-
-Core options are grouped by system under *Quick Menu → Core Options*. They cover region, timing, aspect ratio, sprite limits, borders, overclocking, palettes, LCD color correction and frame blending.
+1. Build the core (below), or download a build
+2. Copy `jgenesis_libretro.so` / `.dll` / `.dylib` into RetroArch's `cores` directory
+3. Copy [`jgenesis_libretro.info`](jgenesis_libretro.info) into its `cores` directory too
+4. Load content with *Load Core → jgenesis*.
 
 ### Saves
 
@@ -82,4 +84,4 @@ The jgenesis backend crates are used unmodified, as git dependencies pinned to a
 
 ## License
 
-GPL-3.0-or-later, the same as jgenesis.
+[GPL-3.0-or-later](LICENSE). The same [license as jgenesis](https://github.com/jsgroth/jgenesis/blob/master/LICENSE).
