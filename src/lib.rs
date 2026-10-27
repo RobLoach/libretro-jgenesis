@@ -129,21 +129,6 @@ pub unsafe extern "C" fn retro_get_system_av_info(info: *mut RetroSystemAvInfo) 
     }
 }
 
-const CONTROLLER_TYPES: &[RetroControllerDescription] = &[
-    RetroControllerDescription { desc: c"Gamepad".as_ptr(), id: ffi::RETRO_DEVICE_JOYPAD },
-    RetroControllerDescription {
-        desc: c"Genesis 3-Button Pad".as_ptr(),
-        id: systems::GENESIS_DEVICE_3_BUTTON,
-    },
-    RetroControllerDescription { desc: c"None".as_ptr(), id: ffi::RETRO_DEVICE_NONE },
-];
-
-struct SyncPtr<T>(T);
-// SAFETY: Only used for immutable static data containing pointers to 'static strings
-unsafe impl<T> Sync for SyncPtr<T> {}
-
-static CONTROLLER_TYPE_LIST: SyncPtr<&[RetroControllerDescription]> = SyncPtr(CONTROLLER_TYPES);
-
 /// # Safety
 ///
 /// `cb` must be a valid environment callback.
@@ -169,22 +154,6 @@ pub unsafe extern "C" fn retro_set_environment(cb: Option<ffi::RetroEnvironmentF
             env::environment(
                 ffi::RETRO_ENVIRONMENT_SET_CONTENT_INFO_OVERRIDE,
                 overrides.as_ptr().cast_mut().cast(),
-            );
-        }
-
-        let types = CONTROLLER_TYPE_LIST.0;
-        let ports: Vec<_> = (0..5)
-            .map(|_| RetroControllerInfo {
-                types: types.as_ptr(),
-                num_types: types.len() as c_uint,
-            })
-            .chain([RetroControllerInfo { types: ptr::null(), num_types: 0 }])
-            .collect();
-        // SAFETY: SET_CONTROLLER_INFO takes a NULL-terminated retro_controller_info array
-        unsafe {
-            env::environment(
-                ffi::RETRO_ENVIRONMENT_SET_CONTROLLER_INFO,
-                ports.as_ptr().cast_mut().cast(),
             );
         }
 
@@ -283,6 +252,44 @@ fn input_descriptors(console: Console) -> (usize, &'static [(c_uint, &'static CS
     }
 }
 
+/// Advertise the controller types for each of the loaded system's ports. The frontend keeps its
+/// own copy of the arrays.
+fn set_controller_info(console: Console) {
+    let (ports, _) = input_descriptors(console);
+
+    let types: Vec<_> = match console {
+        // Only Genesis-family ports can change controller type (see `System::set_controller`)
+        Console::Genesis | Console::SegaCd | Console::Sega32X | Console::SegaCd32X => vec![
+            RetroControllerDescription {
+                desc: c"6-Button Pad".as_ptr(),
+                id: ffi::RETRO_DEVICE_JOYPAD,
+            },
+            RetroControllerDescription {
+                desc: c"3-Button Pad".as_ptr(),
+                id: systems::GENESIS_DEVICE_3_BUTTON,
+            },
+            RetroControllerDescription { desc: c"None".as_ptr(), id: ffi::RETRO_DEVICE_NONE },
+        ],
+        _ => vec![RetroControllerDescription {
+            desc: c"Gamepad".as_ptr(),
+            id: ffi::RETRO_DEVICE_JOYPAD,
+        }],
+    };
+
+    let infos: Vec<_> = (0..ports)
+        .map(|_| RetroControllerInfo { types: types.as_ptr(), num_types: types.len() as c_uint })
+        .chain([RetroControllerInfo { types: ptr::null(), num_types: 0 }])
+        .collect();
+
+    // SAFETY: SET_CONTROLLER_INFO takes a NULL-terminated retro_controller_info array
+    unsafe {
+        env::environment(
+            ffi::RETRO_ENVIRONMENT_SET_CONTROLLER_INFO,
+            infos.as_ptr().cast_mut().cast(),
+        );
+    }
+}
+
 fn set_input_descriptors(console: Console) {
     let (ports, buttons) = input_descriptors(console);
 
@@ -357,6 +364,7 @@ pub unsafe extern "C" fn retro_load_game(game: *const RetroGameInfo) -> bool {
         };
 
         set_input_descriptors(loaded.console);
+        set_controller_info(loaded.console);
         if matches!(loaded.console, Console::SegaCd | Console::SegaCd32X | Console::PcEngineCd) {
             register_disk_control();
         }
