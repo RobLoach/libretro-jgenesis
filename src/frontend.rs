@@ -31,7 +31,10 @@ pub struct VideoOutput {
     pub target_fps: f64,
     /// Set whenever the emulator renders a frame; cleared by the caller
     pub frame_rendered: bool,
-    previous_frame: Vec<u32>,
+    /// Previous frame before blending, for frame blending (which blends the current and previous
+    /// emulator frames, not the current frame and the previous blended output)
+    previous_raw_frame: Vec<u32>,
+    raw_frame: Vec<u32>,
     correction: Option<(ColorCorrection, Box<CorrectionLut>)>,
 }
 
@@ -48,23 +51,28 @@ impl Renderer for VideoOutput {
         let len = frame_size.len() as usize;
         let pixels = &frame_buffer[..len];
 
-        if options.frame_blending {
-            std::mem::swap(&mut self.frame, &mut self.previous_frame);
-        }
-
-        self.frame.clear();
+        // Without blending, convert straight into the output frame
+        let target = if options.frame_blending { &mut self.raw_frame } else { &mut self.frame };
+        target.clear();
         match options.color_correction {
             ColorCorrection::None => {
-                self.frame.extend(pixels.iter().map(|&color| to_xrgb8888(color)));
+                target.extend(pixels.iter().map(|&color| to_xrgb8888(color)));
             }
             correction => {
                 let lut = correction_lut(&mut self.correction, correction);
-                self.frame.extend(pixels.iter().map(|&color| lut.apply(color)));
+                target.extend(pixels.iter().map(|&color| lut.apply(color)));
             }
         }
 
-        if options.frame_blending && self.previous_frame.len() == self.frame.len() {
-            blend_frames(&mut self.frame, &self.previous_frame);
+        if options.frame_blending {
+            self.frame.clear();
+            self.frame.extend_from_slice(&self.raw_frame);
+            if self.previous_raw_frame.len() == self.frame.len() {
+                blend_frames(&mut self.frame, &self.previous_raw_frame);
+            }
+            std::mem::swap(&mut self.raw_frame, &mut self.previous_raw_frame);
+        } else {
+            self.previous_raw_frame.clear();
         }
 
         self.size = Some(frame_size);
@@ -295,5 +303,35 @@ impl SaveWriter for SaveFiles {
             .map_err(|err| SaveError(format!("Error encoding .{extension} save: {err}")))?;
         self.pending.insert(extension.into(), bytes);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn render(video: &mut VideoOutput, color: Color) {
+        let options = RenderFrameOptions { frame_blending: true, ..RenderFrameOptions::default() };
+        let size = FrameSize { width: 1, height: 1 };
+        video.render_frame(&[color], size, 60.0, options).unwrap();
+    }
+
+    #[test]
+    fn frame_blending_averages_only_the_last_two_frames() {
+        let mut video = VideoOutput::default();
+        let white = Color::rgb(255, 255, 255);
+
+        // First frame has nothing to blend with
+        render(&mut video, white);
+        assert_eq!(video.frame, [0x00FF_FFFF]);
+
+        // White + black averages to mid-grey (in linear light, so ~188 after sRGB encoding)
+        render(&mut video, Color::BLACK);
+        let grey = video.frame[0];
+        assert!(grey != 0 && grey != 0x00FF_FFFF);
+
+        // Two black frames in a row must be pure black: an older white frame must not linger
+        render(&mut video, Color::BLACK);
+        assert_eq!(video.frame, [0]);
     }
 }
