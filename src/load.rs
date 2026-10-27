@@ -155,7 +155,7 @@ fn load_disc(
             GenesisHardware::SegaCd
         };
 
-        let region = forced_genesis_region(options)
+        let region = systems::genesis_region(options)
             .or_else(|| segacd_core::parse_disc_region(&mut disc).ok())
             .unwrap_or(GenesisRegion::Americas);
         let bios = dirs.read_firmware(sega_cd_bios_name(region))?;
@@ -164,12 +164,6 @@ fn load_disc(
     };
 
     Ok(LoadedGame { session, console, discs: vec![path.to_path_buf()] })
-}
-
-fn forced_genesis_region(options: &Options) -> Option<GenesisRegion> {
-    let mut config = GenesisEmulatorConfig::default();
-    <GenesisEmulator as crate::session::System>::apply_options(options, &mut config);
-    config.forced_region
 }
 
 fn sega_cd_bios_name(region: GenesisRegion) -> &'static str {
@@ -217,7 +211,7 @@ fn load_cartridge(
         Console::SegaCd | Console::SegaCd32X => {
             // Cartridge that supports Sega CD hardware; boot with Sega CD attached if the BIOS is
             // available, otherwise fall back to running it as a plain cartridge
-            let region = forced_genesis_region(options).unwrap_or(GenesisRegion::Americas);
+            let region = systems::genesis_region(options).unwrap_or(GenesisRegion::Americas);
             let (with_cd, without_cd) = if console == Console::SegaCd32X {
                 (GenesisHardware::SegaCd32X, GenesisHardware::Sega32X)
             } else {

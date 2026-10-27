@@ -57,6 +57,16 @@ fn gamma(value: f32) -> FiniteF32 {
 
 // Genesis / Sega CD / 32X
 
+/// Region forced by the core options, if any
+pub fn genesis_region(options: &Options) -> Option<GenesisRegion> {
+    match options.get("genesis_region") {
+        "americas" => Some(GenesisRegion::Americas),
+        "japan" => Some(GenesisRegion::Japan),
+        "europe" => Some(GenesisRegion::Europe),
+        _ => None,
+    }
+}
+
 pub fn genesis_inputs() -> GenesisInputs {
     GenesisInputs {
         p1: GenesisController::new(GenesisControllerType::SixButton),
@@ -93,12 +103,7 @@ impl System for GenesisEmulator {
     const MAX_FRAME_SIZE: (u32, u32) = (352, 480);
 
     fn apply_options(options: &Options, config: &mut GenesisEmulatorConfig) {
-        config.forced_region = match options.get("genesis_region") {
-            "americas" => Some(GenesisRegion::Americas),
-            "japan" => Some(GenesisRegion::Japan),
-            "europe" => Some(GenesisRegion::Europe),
-            _ => None,
-        };
+        config.forced_region = genesis_region(options);
         config.forced_timing_mode = timing_option(options.get("genesis_timing"));
         config.aspect_ratio = match options.get("genesis_aspect_ratio") {
             "ntsc" => GenesisAspectRatio::Ntsc,
