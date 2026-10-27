@@ -279,15 +279,7 @@ impl SaveWriter for SaveFiles {
     }
 
     fn persist_bytes(&mut self, extension: &str, bytes: &[u8]) -> Result<(), Self::Err> {
-        match self.pending.get_mut(extension) {
-            Some(existing) => {
-                existing.clear();
-                existing.extend_from_slice(bytes);
-            }
-            None => {
-                self.pending.insert(extension.into(), bytes.to_vec());
-            }
-        }
+        self.pending.insert(extension.into(), bytes.to_vec());
         Ok(())
     }
 
