@@ -414,9 +414,8 @@ pub static OPTIONS: &[CoreOption] = &[
 
 /// Owns the C structures handed to the frontend so their pointers stay valid.
 struct Registered {
-    _categories: Vec<RetroCoreOptionV2Category>,
+    categories: Vec<RetroCoreOptionV2Category>,
     definitions: Vec<RetroCoreOptionV2Definition>,
-    categories_ptr: *const RetroCoreOptionV2Category,
     _legacy_strings: Vec<CString>,
     legacy: Vec<ffi::RetroVariable>,
 }
@@ -504,14 +503,7 @@ fn build() -> Registered {
         .collect();
     legacy.push(ffi::RetroVariable { key: ptr::null(), value: ptr::null() });
 
-    let categories_ptr = categories.as_ptr();
-    Registered {
-        _categories: categories,
-        definitions,
-        categories_ptr,
-        _legacy_strings: legacy_strings,
-        legacy,
-    }
+    Registered { categories, definitions, _legacy_strings: legacy_strings, legacy }
 }
 
 /// Register all core options with the frontend. Must be called from `retro_set_environment`.
@@ -526,7 +518,7 @@ pub fn register() {
 
     if has_version && version >= 2 {
         let mut options = ffi::RetroCoreOptionsV2 {
-            categories: registered.categories_ptr,
+            categories: registered.categories.as_ptr(),
             definitions: registered.definitions.as_ptr(),
         };
         // SAFETY: SET_CORE_OPTIONS_V2 takes a const retro_core_options_v2*
