@@ -1,0 +1,13 @@
+/target
+*.so
+*.dll
+*.dylib
+*.a
+/.rust
+/jni/libs
+/jni/obj
+/jni/prebuilt
+/libs
+/obj
+/vendor
+.DS_Store

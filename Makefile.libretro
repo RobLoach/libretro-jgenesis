@@ -1,0 +1,224 @@
+# Builds the jgenesis libretro core with cargo, using libretro platform names.
+#
+#   make -f Makefile.libretro                         # host platform
+#   make -f Makefile.libretro platform=unix ARCH=aarch64
+#   make -f Makefile.libretro platform=win64
+#   make -f Makefile.libretro platform=osx ARCH=arm64
+#   make -f Makefile.libretro platform=android ABI=arm64-v8a   # needs NDK_ROOT or ANDROID_NDK_HOME
+#   make -f Makefile.libretro platform=ios-arm64
+#   make -f Makefile.libretro platform=tvos-arm64              # needs a nightly toolchain
+#   make -f Makefile.libretro platform=emscripten              # needs emsdk
+#   make -f Makefile.libretro platform=webos                   # needs CROSS_COMPILE
+#
+# Variables:
+#   TARGET       Override the Rust target triple
+#   CARGO        Cargo command (default: cargo)
+#   CARGO_BUILD  Cargo build subcommand, e.g. "zigbuild" when using cargo-zigbuild (default: build)
+#   CROSS_COMPILE / CC  Cross C compiler, also used as the linker
+#   GLIBC        Minimum glibc version for Linux targets with CARGO_BUILD=zigbuild (e.g. 2.28)
+#   RUST_BOOTSTRAP=1  Install rustup into .rust/ if cargo is missing, and add the target. For CI
+#                images that only ship a C toolchain (e.g. libretro's GitLab CI templates).
+
+CORENAME := jgenesis
+CARGO ?= cargo
+CARGO_BUILD ?= build
+PROFILE := release
+CARGO_FLAGS :=
+RUSTFLAGS_EXTRA :=
+CRATE_TYPE := cdylib
+
+ifeq ($(platform),)
+  platform := unix
+  ifneq ($(findstring MINGW,$(shell uname -s)),)
+    platform := win
+  else ifneq ($(findstring MSYS,$(shell uname -s)),)
+    platform := win
+  else ifneq ($(findstring Darwin,$(shell uname -s)),)
+    platform := osx
+  endif
+endif
+
+HOST_ARCH := $(shell uname -m)
+ARCH ?= $(HOST_ARCH)
+
+# Normalize architecture names
+ifneq ($(filter $(ARCH),amd64 x64 x86_64),)
+  ARCH := x86_64
+else ifneq ($(filter $(ARCH),i386 i486 i586 i686 x86),)
+  ARCH := i686
+else ifneq ($(filter $(ARCH),arm64 aarch64),)
+  ARCH := aarch64
+else ifneq ($(filter $(ARCH),arm armv7 armv7l armv7a armhf),)
+  ARCH := armv7
+endif
+
+ifneq ($(filter $(platform),unix linux),)
+  EXT := so
+  ifeq ($(ARCH),armv7)
+    TARGET ?= armv7-unknown-linux-gnueabihf
+  else
+    TARGET ?= $(ARCH)-unknown-linux-gnu
+  endif
+  BUILT_LIB := lib$(CORENAME)_libretro.so
+  OUTPUT := $(CORENAME)_libretro.so
+
+else ifneq ($(filter $(platform),win win32 win64 windows mingw mingw64),)
+  ifeq ($(platform),win32)
+    ARCH := i686
+  else ifeq ($(platform),win64)
+    ARCH := x86_64
+  endif
+  TARGET ?= $(ARCH)-pc-windows-gnu
+  BUILT_LIB := $(CORENAME)_libretro.dll
+  OUTPUT := $(CORENAME)_libretro.dll
+
+else ifneq ($(filter $(platform),windows_msvc msvc),)
+  TARGET ?= $(ARCH)-pc-windows-msvc
+  BUILT_LIB := $(CORENAME)_libretro.dll
+  OUTPUT := $(CORENAME)_libretro.dll
+
+else ifneq ($(filter $(platform),osx macos),)
+  TARGET ?= $(ARCH)-apple-darwin
+  BUILT_LIB := lib$(CORENAME)_libretro.dylib
+  OUTPUT := $(CORENAME)_libretro.dylib
+  ifeq ($(ARCH),x86_64)
+    export MACOSX_DEPLOYMENT_TARGET ?= 10.13
+  else
+    export MACOSX_DEPLOYMENT_TARGET ?= 11.0
+  endif
+
+else ifneq ($(filter $(platform),ios-arm64 ios),)
+  TARGET ?= aarch64-apple-ios
+  BUILT_LIB := lib$(CORENAME)_libretro.dylib
+  OUTPUT := $(CORENAME)_libretro_ios.dylib
+  export IPHONEOS_DEPLOYMENT_TARGET ?= 11.0
+  RUSTFLAGS_EXTRA += -C link-arg=-Wl,-install_name,@rpath/$(OUTPUT)
+
+else ifeq ($(platform),tvos-arm64)
+  # aarch64-apple-tvos is a tier 3 target: no prebuilt std, so build it with a nightly toolchain
+  TARGET ?= aarch64-apple-tvos
+  CARGO := $(CARGO) +nightly
+  CARGO_FLAGS += -Zbuild-std=std,panic_unwind
+  BUILT_LIB := lib$(CORENAME)_libretro.dylib
+  OUTPUT := $(CORENAME)_libretro_tvos.dylib
+  export TVOS_DEPLOYMENT_TARGET ?= 11.0
+  RUSTFLAGS_EXTRA += -C link-arg=-Wl,-install_name,@rpath/$(OUTPUT)
+
+else ifeq ($(platform),android)
+  ABI ?= arm64-v8a
+  ANDROID_API ?= 21
+  NDK := $(or $(NDK_ROOT),$(ANDROID_NDK_HOME),$(ANDROID_NDK_LATEST_HOME),$(ANDROID_NDK_ROOT),$(ANDROID_NDK))
+  ifeq ($(NDK),)
+    $(error platform=android requires NDK_ROOT or ANDROID_NDK_HOME to point to the Android NDK)
+  endif
+  ifeq ($(ABI),armeabi-v7a)
+    TARGET ?= armv7-linux-androideabi
+    NDK_CLANG := armv7a-linux-androideabi$(ANDROID_API)-clang
+  else ifeq ($(ABI),arm64-v8a)
+    TARGET ?= aarch64-linux-android
+    NDK_CLANG := aarch64-linux-android$(ANDROID_API)-clang
+  else ifeq ($(ABI),x86)
+    TARGET ?= i686-linux-android
+    NDK_CLANG := i686-linux-android$(ANDROID_API)-clang
+  else ifeq ($(ABI),x86_64)
+    TARGET ?= x86_64-linux-android
+    NDK_CLANG := x86_64-linux-android$(ANDROID_API)-clang
+  else
+    $(error Unsupported Android ABI '$(ABI)')
+  endif
+  NDK_HOST := $(if $(findstring Darwin,$(shell uname -s)),darwin-x86_64,linux-x86_64)
+  NDK_BIN := $(NDK)/toolchains/llvm/prebuilt/$(NDK_HOST)/bin
+  CROSS_CC := $(NDK_BIN)/$(NDK_CLANG)
+  CROSS_AR := $(NDK_BIN)/llvm-ar
+  # Android 15+ devices may use 16 KiB pages
+  RUSTFLAGS_EXTRA += -C link-arg=-Wl,-z,max-page-size=16384
+  BUILT_LIB := lib$(CORENAME)_libretro.so
+  OUTPUT := $(CORENAME)_libretro_android.so
+
+else ifeq ($(platform),webos)
+  # LG webOS TVs: 32-bit ARM, soft-float ABI
+  TARGET ?= armv7-unknown-linux-gnueabi
+  BUILT_LIB := lib$(CORENAME)_libretro.so
+  OUTPUT := $(CORENAME)_libretro.so
+
+else ifeq ($(platform),emscripten)
+  # RetroArch's web player statically links cores. Unwinding across the JS boundary isn't
+  # supported there, so panics abort.
+  TARGET ?= wasm32-unknown-emscripten
+  CRATE_TYPE := staticlib
+  CARGO_FLAGS += --config 'profile.release.panic="abort"'
+  BUILT_LIB := lib$(CORENAME)_libretro.a
+  OUTPUT := $(CORENAME)_libretro_emscripten.a
+
+else
+  $(error Unsupported platform '$(platform)'. See the comment at the top of Makefile.libretro)
+endif
+
+# Cross C compiler / linker from CROSS_COMPILE or an explicitly set CC (zstd-sys builds C code)
+ifneq ($(CROSS_COMPILE),)
+  CROSS_CC ?= $(CROSS_COMPILE)gcc
+  CROSS_AR ?= $(CROSS_COMPILE)ar
+else ifneq ($(filter environment command line,$(origin CC)),)
+  CROSS_CC ?= $(CC)
+endif
+
+TARGET_ENV := $(subst -,_,$(TARGET))
+TARGET_ENV_UPPER := $(shell echo '$(TARGET_ENV)' | tr '[:lower:]' '[:upper:]')
+
+ifneq ($(CROSS_CC),)
+  ifneq ($(CARGO_BUILD),zigbuild)
+    export CARGO_TARGET_$(TARGET_ENV_UPPER)_LINKER := $(CROSS_CC)
+  endif
+  export CC_$(TARGET_ENV) := $(CROSS_CC)
+endif
+ifneq ($(CROSS_AR),)
+  export AR_$(TARGET_ENV) := $(CROSS_AR)
+endif
+ifneq ($(strip $(RUSTFLAGS_EXTRA)),)
+  export CARGO_TARGET_$(TARGET_ENV_UPPER)_RUSTFLAGS := $(strip $(RUSTFLAGS_EXTRA))
+endif
+
+TARGET_DIR := target/$(TARGET)/$(PROFILE)
+
+# cargo-zigbuild accepts a glibc version suffix on the target, e.g. aarch64-unknown-linux-gnu.2.28
+TARGET_ARG := $(TARGET)
+ifeq ($(CARGO_BUILD),zigbuild)
+  ifneq ($(GLIBC),)
+    TARGET_ARG := $(TARGET).$(GLIBC)
+  endif
+endif
+
+ifeq ($(RUST_BOOTSTRAP),1)
+  export RUSTUP_HOME := $(CURDIR)/.rust/rustup
+  export CARGO_HOME := $(CURDIR)/.rust/cargo
+  export PATH := $(CARGO_HOME)/bin:$(PATH)
+endif
+
+all: $(OUTPUT)
+
+# Always defer to cargo, which tracks its own dependencies
+.PHONY: all clean rust-bootstrap $(OUTPUT)
+
+rust-bootstrap:
+ifeq ($(RUST_BOOTSTRAP),1)
+	command -v rustup >/dev/null 2>&1 || \
+		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+		sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
+ifeq ($(platform),tvos-arm64)
+	rustup toolchain install nightly --profile minimal --component rust-src
+else
+	rustup target add $(TARGET)
+endif
+endif
+
+$(OUTPUT): rust-bootstrap
+ifeq ($(CRATE_TYPE),cdylib)
+	$(CARGO) $(CARGO_BUILD) --lib --profile $(PROFILE) --target $(TARGET_ARG) $(CARGO_FLAGS)
+else
+	$(CARGO) rustc --lib --crate-type $(CRATE_TYPE) --profile $(PROFILE) --target $(TARGET_ARG) $(CARGO_FLAGS)
+endif
+	cp $(TARGET_DIR)/$(BUILT_LIB) $(OUTPUT)
+
+clean:
+	rm -f $(OUTPUT)
+	$(CARGO) clean --target $(TARGET) --profile $(PROFILE)

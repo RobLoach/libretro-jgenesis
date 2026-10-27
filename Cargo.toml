@@ -1,0 +1,70 @@
+[package]
+name = "jgenesis-libretro"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "libretro core for jgenesis, a multi-system emulator"
+repository = "https://github.com/RobLoach/libretro-jgenesis"
+publish = false
+
+[lib]
+name = "jgenesis_libretro"
+crate-type = ["cdylib"]
+
+[dependencies]
+bincode = "2"
+log = { version = "0.4", features = ["std"] }
+
+cdrom = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+gb-config = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+gb-core = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+gba-config = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+gba-core = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+genesis-config = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+genesis-core = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+jgenesis-common = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+nes-config = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+nes-core = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+pce-config = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+pce-core = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+s32x-core = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+segacd-core = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+smsgg-config = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+smsgg-core = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+snes-config = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+snes-core = { git = "https://github.com/jsgroth/jgenesis", rev = "0a00c47ba7a16bd6e77ef7e0b6c8fab2fc603cba" }
+
+[dev-dependencies]
+libloading = "0.8"
+
+[profile.dev]
+# The emulation cores are unusably slow without optimizations
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+# panic must unwind (not abort) so that a core panic can be caught instead of killing the frontend
+panic = "unwind"
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[lints.rust]
+rust_2018_idioms = "warn"
+
+# Same policy as jgenesis: pedantic, minus lints with high false positive rates
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+similar_names = "allow"
+single_match_else = "allow"
+too_many_lines = "allow"

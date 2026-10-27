@@ -1,0 +1,5 @@
+[toolchain]
+# jgenesis tracks the latest stable Rust release
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
