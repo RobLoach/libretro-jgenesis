@@ -414,13 +414,8 @@ fn register_disk_control() {
     }
 }
 
-fn with_game<T>(name: &str, default: T, f: impl FnOnce(&mut Game) -> T) -> T {
-    guard(name, default, || match &mut core().game {
-        Some(game) => f(game),
-        None => {
-            panic::resume_unwind(Box::new("no game loaded"));
-        }
-    })
+fn with_game<T: Copy>(name: &str, default: T, f: impl FnOnce(&mut Game) -> T) -> T {
+    guard(name, default, || core().game.as_mut().map_or(default, f))
 }
 
 extern "C" fn disk_set_eject_state(ejected: bool) -> bool {
