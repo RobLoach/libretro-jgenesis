@@ -10,10 +10,7 @@ mod session;
 mod systems;
 
 use detect::Console;
-use ffi::{
-    RetroControllerDescription, RetroControllerInfo, RetroGameInfo, RetroInputDescriptor,
-    RetroSystemAvInfo, RetroSystemContentInfoOverride, RetroSystemInfo,
-};
+use ffi::{RetroGameInfo, RetroSystemAvInfo, RetroSystemContentInfoOverride, RetroSystemInfo};
 use load::LoadedGame;
 use options::Options;
 use std::any::Any;
@@ -200,127 +197,6 @@ pub extern "C" fn retro_deinit() {
     });
 }
 
-fn input_descriptors(console: Console) -> (usize, &'static [(c_uint, &'static CStr)]) {
-    use ffi::{
-        RETRO_DEVICE_ID_JOYPAD_A as A, RETRO_DEVICE_ID_JOYPAD_B as B,
-        RETRO_DEVICE_ID_JOYPAD_DOWN as DOWN, RETRO_DEVICE_ID_JOYPAD_L as L,
-        RETRO_DEVICE_ID_JOYPAD_LEFT as LEFT, RETRO_DEVICE_ID_JOYPAD_R as R,
-        RETRO_DEVICE_ID_JOYPAD_RIGHT as RIGHT, RETRO_DEVICE_ID_JOYPAD_SELECT as SELECT,
-        RETRO_DEVICE_ID_JOYPAD_START as START, RETRO_DEVICE_ID_JOYPAD_UP as UP,
-        RETRO_DEVICE_ID_JOYPAD_X as X, RETRO_DEVICE_ID_JOYPAD_Y as Y,
-    };
-
-    const DPAD: [(c_uint, &CStr); 4] =
-        [(UP, c"Up"), (DOWN, c"Down"), (LEFT, c"Left"), (RIGHT, c"Right")];
-
-    macro_rules! with_dpad {
-        ($($id:expr => $label:literal),* $(,)?) => {
-            &[DPAD[0], DPAD[1], DPAD[2], DPAD[3], $(($id, $label)),*]
-        };
-    }
-
-    match console {
-        Console::Genesis | Console::SegaCd | Console::Sega32X | Console::SegaCd32X => (
-            2,
-            with_dpad![Y => c"A", B => c"B", A => c"C", L => c"X", X => c"Y", R => c"Z",
-                START => c"Start", SELECT => c"Mode"],
-        ),
-        Console::Sg1000 | Console::MasterSystem | Console::GameGear => {
-            (2, with_dpad![B => c"Button 1", A => c"Button 2", START => c"Start / Pause"])
-        }
-        Console::Nes => {
-            (2, with_dpad![A => c"A", B => c"B", START => c"Start", SELECT => c"Select"])
-        }
-        Console::Snes => (
-            2,
-            with_dpad![A => c"A", B => c"B", X => c"X", Y => c"Y", L => c"L", R => c"R",
-                START => c"Start", SELECT => c"Select"],
-        ),
-        Console::GameBoy => {
-            (1, with_dpad![A => c"A", B => c"B", START => c"Start", SELECT => c"Select"])
-        }
-        Console::GameBoyAdvance => (
-            1,
-            with_dpad![A => c"A", B => c"B", L => c"L", R => c"R", START => c"Start",
-                SELECT => c"Select"],
-        ),
-        Console::PcEngine | Console::PcEngineCd => (
-            5,
-            with_dpad![A => c"I", B => c"II", Y => c"III", X => c"IV", L => c"V", R => c"VI",
-                START => c"Run", SELECT => c"Select"],
-        ),
-    }
-}
-
-/// Advertise the controller types for each of the loaded system's ports. The frontend keeps its
-/// own copy of the arrays.
-fn set_controller_info(console: Console) {
-    let (ports, _) = input_descriptors(console);
-
-    let types: Vec<_> = match console {
-        // Only Genesis-family ports can change controller type (see `System::set_controller`)
-        Console::Genesis | Console::SegaCd | Console::Sega32X | Console::SegaCd32X => vec![
-            RetroControllerDescription {
-                desc: c"6-Button Pad".as_ptr(),
-                id: ffi::RETRO_DEVICE_JOYPAD,
-            },
-            RetroControllerDescription {
-                desc: c"3-Button Pad".as_ptr(),
-                id: systems::GENESIS_DEVICE_3_BUTTON,
-            },
-            RetroControllerDescription { desc: c"None".as_ptr(), id: ffi::RETRO_DEVICE_NONE },
-        ],
-        _ => vec![RetroControllerDescription {
-            desc: c"Gamepad".as_ptr(),
-            id: ffi::RETRO_DEVICE_JOYPAD,
-        }],
-    };
-
-    let infos: Vec<_> = (0..ports)
-        .map(|_| RetroControllerInfo { types: types.as_ptr(), num_types: types.len() as c_uint })
-        .chain([RetroControllerInfo { types: ptr::null(), num_types: 0 }])
-        .collect();
-
-    // SAFETY: SET_CONTROLLER_INFO takes a NULL-terminated retro_controller_info array
-    unsafe {
-        env::environment(
-            ffi::RETRO_ENVIRONMENT_SET_CONTROLLER_INFO,
-            infos.as_ptr().cast_mut().cast(),
-        );
-    }
-}
-
-fn set_input_descriptors(console: Console) {
-    let (ports, buttons) = input_descriptors(console);
-
-    let descriptors: Vec<_> = (0..ports as c_uint)
-        .flat_map(|port| {
-            buttons.iter().map(move |&(id, label)| RetroInputDescriptor {
-                port,
-                device: ffi::RETRO_DEVICE_JOYPAD,
-                index: 0,
-                id,
-                description: label.as_ptr(),
-            })
-        })
-        .chain([RetroInputDescriptor {
-            port: 0,
-            device: 0,
-            index: 0,
-            id: 0,
-            description: ptr::null(),
-        }])
-        .collect();
-
-    // SAFETY: SET_INPUT_DESCRIPTORS takes a NULL-terminated retro_input_descriptor array
-    unsafe {
-        env::environment(
-            ffi::RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS,
-            descriptors.as_ptr().cast_mut().cast(),
-        );
-    }
-}
-
 /// # Safety
 ///
 /// `game` must be NULL or a valid pointer to a `retro_game_info`.
@@ -363,8 +239,6 @@ pub unsafe extern "C" fn retro_load_game(game: *const RetroGameInfo) -> bool {
             }
         };
 
-        set_input_descriptors(loaded.console);
-        set_controller_info(loaded.console);
         if matches!(loaded.console, Console::SegaCd | Console::SegaCd32X | Console::PcEngineCd) {
             register_disk_control();
         }

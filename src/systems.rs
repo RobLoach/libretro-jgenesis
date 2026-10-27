@@ -28,6 +28,7 @@ use smsgg_config::{GgAspectRatio, SmsAspectRatio, SmsGgButton, SmsGgRegion, SmsM
 use smsgg_core::{SmsGgEmulator, SmsGgEmulatorConfig};
 use snes_config::{AudioInterpolationMode, SnesAspectRatio, SnesButton};
 use snes_core::api::{SnesEmulator, SnesEmulatorConfig};
+use std::ffi::CStr;
 use std::num::{NonZeroU32, NonZeroU64};
 
 use ffi::{
@@ -68,19 +69,25 @@ impl System for GenesisEmulator {
 
     // Same layout as Genesis Plus GX: the bottom face row (Y, B, A) is A, B, C and the shoulder
     // and top face buttons are X, Y, Z
-    const BUTTONS: &'static [(u32, GenesisButton)] = &[
-        (UP, GenesisButton::Up),
-        (DOWN, GenesisButton::Down),
-        (LEFT, GenesisButton::Left),
-        (RIGHT, GenesisButton::Right),
-        (Y, GenesisButton::A),
-        (B, GenesisButton::B),
-        (A, GenesisButton::C),
-        (L, GenesisButton::X),
-        (X, GenesisButton::Y),
-        (R, GenesisButton::Z),
-        (START, GenesisButton::Start),
-        (SELECT, GenesisButton::Mode),
+    const BUTTONS: &'static [(u32, GenesisButton, &'static CStr)] = &[
+        (UP, GenesisButton::Up, c"Up"),
+        (DOWN, GenesisButton::Down, c"Down"),
+        (LEFT, GenesisButton::Left, c"Left"),
+        (RIGHT, GenesisButton::Right, c"Right"),
+        (Y, GenesisButton::A, c"A"),
+        (B, GenesisButton::B, c"B"),
+        (A, GenesisButton::C, c"C"),
+        (L, GenesisButton::X, c"X"),
+        (X, GenesisButton::Y, c"Y"),
+        (R, GenesisButton::Z, c"Z"),
+        (START, GenesisButton::Start, c"Start"),
+        (SELECT, GenesisButton::Mode, c"Mode"),
+    ];
+
+    const CONTROLLER_TYPES: &'static [(&'static CStr, u32)] = &[
+        (c"6-Button Pad", ffi::RETRO_DEVICE_JOYPAD),
+        (c"3-Button Pad", GENESIS_DEVICE_3_BUTTON),
+        (c"None", ffi::RETRO_DEVICE_NONE),
     ];
 
     const MAX_FRAME_SIZE: (u32, u32) = (352, 480);
@@ -176,14 +183,14 @@ pub fn smsgg_config() -> SmsGgEmulatorConfig {
 impl System for SmsGgEmulator {
     const PORTS: usize = 2;
 
-    const BUTTONS: &'static [(u32, SmsGgButton)] = &[
-        (UP, SmsGgButton::Up),
-        (DOWN, SmsGgButton::Down),
-        (LEFT, SmsGgButton::Left),
-        (RIGHT, SmsGgButton::Right),
-        (B, SmsGgButton::Button1),
-        (A, SmsGgButton::Button2),
-        (START, SmsGgButton::Pause),
+    const BUTTONS: &'static [(u32, SmsGgButton, &'static CStr)] = &[
+        (UP, SmsGgButton::Up, c"Up"),
+        (DOWN, SmsGgButton::Down, c"Down"),
+        (LEFT, SmsGgButton::Left, c"Left"),
+        (RIGHT, SmsGgButton::Right, c"Right"),
+        (B, SmsGgButton::Button1, c"Button 1"),
+        (A, SmsGgButton::Button2, c"Button 2"),
+        (START, SmsGgButton::Pause, c"Start / Pause"),
     ];
 
     const MAX_FRAME_SIZE: (u32, u32) = (256, 240);
@@ -228,15 +235,15 @@ pub fn nes_config() -> NesEmulatorConfig {
 impl System for NesEmulator {
     const PORTS: usize = 2;
 
-    const BUTTONS: &'static [(u32, NesButton)] = &[
-        (UP, NesButton::Up),
-        (DOWN, NesButton::Down),
-        (LEFT, NesButton::Left),
-        (RIGHT, NesButton::Right),
-        (A, NesButton::A),
-        (B, NesButton::B),
-        (START, NesButton::Start),
-        (SELECT, NesButton::Select),
+    const BUTTONS: &'static [(u32, NesButton, &'static CStr)] = &[
+        (UP, NesButton::Up, c"Up"),
+        (DOWN, NesButton::Down, c"Down"),
+        (LEFT, NesButton::Left, c"Left"),
+        (RIGHT, NesButton::Right, c"Right"),
+        (A, NesButton::A, c"A"),
+        (B, NesButton::B, c"B"),
+        (START, NesButton::Start, c"Start"),
+        (SELECT, NesButton::Select, c"Select"),
     ];
 
     const MAX_FRAME_SIZE: (u32, u32) = (256, 240);
@@ -261,19 +268,19 @@ impl System for NesEmulator {
 impl System for SnesEmulator {
     const PORTS: usize = 2;
 
-    const BUTTONS: &'static [(u32, SnesButton)] = &[
-        (UP, SnesButton::Up),
-        (DOWN, SnesButton::Down),
-        (LEFT, SnesButton::Left),
-        (RIGHT, SnesButton::Right),
-        (A, SnesButton::A),
-        (B, SnesButton::B),
-        (X, SnesButton::X),
-        (Y, SnesButton::Y),
-        (L, SnesButton::L),
-        (R, SnesButton::R),
-        (START, SnesButton::Start),
-        (SELECT, SnesButton::Select),
+    const BUTTONS: &'static [(u32, SnesButton, &'static CStr)] = &[
+        (UP, SnesButton::Up, c"Up"),
+        (DOWN, SnesButton::Down, c"Down"),
+        (LEFT, SnesButton::Left, c"Left"),
+        (RIGHT, SnesButton::Right, c"Right"),
+        (A, SnesButton::A, c"A"),
+        (B, SnesButton::B, c"B"),
+        (X, SnesButton::X, c"X"),
+        (Y, SnesButton::Y, c"Y"),
+        (L, SnesButton::L, c"L"),
+        (R, SnesButton::R, c"R"),
+        (START, SnesButton::Start, c"Start"),
+        (SELECT, SnesButton::Select, c"Select"),
     ];
 
     const MAX_FRAME_SIZE: (u32, u32) = (512, 478);
@@ -321,15 +328,15 @@ pub fn gb_config() -> GameBoyEmulatorConfig {
 impl System for GameBoyEmulator {
     const PORTS: usize = 1;
 
-    const BUTTONS: &'static [(u32, GameBoyButton)] = &[
-        (UP, GameBoyButton::Up),
-        (DOWN, GameBoyButton::Down),
-        (LEFT, GameBoyButton::Left),
-        (RIGHT, GameBoyButton::Right),
-        (A, GameBoyButton::A),
-        (B, GameBoyButton::B),
-        (START, GameBoyButton::Start),
-        (SELECT, GameBoyButton::Select),
+    const BUTTONS: &'static [(u32, GameBoyButton, &'static CStr)] = &[
+        (UP, GameBoyButton::Up, c"Up"),
+        (DOWN, GameBoyButton::Down, c"Down"),
+        (LEFT, GameBoyButton::Left, c"Left"),
+        (RIGHT, GameBoyButton::Right, c"Right"),
+        (A, GameBoyButton::A, c"A"),
+        (B, GameBoyButton::B, c"B"),
+        (START, GameBoyButton::Start, c"Start"),
+        (SELECT, GameBoyButton::Select, c"Select"),
     ];
 
     const MAX_FRAME_SIZE: (u32, u32) = (160, 144);
@@ -365,17 +372,17 @@ pub fn gba_config() -> GbaEmulatorConfig {
 impl System for GameBoyAdvanceEmulator {
     const PORTS: usize = 1;
 
-    const BUTTONS: &'static [(u32, GbaButton)] = &[
-        (UP, GbaButton::Up),
-        (DOWN, GbaButton::Down),
-        (LEFT, GbaButton::Left),
-        (RIGHT, GbaButton::Right),
-        (A, GbaButton::A),
-        (B, GbaButton::B),
-        (L, GbaButton::L),
-        (R, GbaButton::R),
-        (START, GbaButton::Start),
-        (SELECT, GbaButton::Select),
+    const BUTTONS: &'static [(u32, GbaButton, &'static CStr)] = &[
+        (UP, GbaButton::Up, c"Up"),
+        (DOWN, GbaButton::Down, c"Down"),
+        (LEFT, GbaButton::Left, c"Left"),
+        (RIGHT, GbaButton::Right, c"Right"),
+        (A, GbaButton::A, c"A"),
+        (B, GbaButton::B, c"B"),
+        (L, GbaButton::L, c"L"),
+        (R, GbaButton::R, c"R"),
+        (START, GbaButton::Start, c"Start"),
+        (SELECT, GbaButton::Select, c"Select"),
     ];
 
     const MAX_FRAME_SIZE: (u32, u32) = (240, 160);
@@ -425,19 +432,19 @@ impl System for PcEngineEmulator {
     const PORTS: usize = 5;
 
     // Same layout as Beetle PCE: A/B are buttons I/II, and Y/X/L/R are 6-button pad III-VI
-    const BUTTONS: &'static [(u32, PceButton)] = &[
-        (UP, PceButton::Up),
-        (DOWN, PceButton::Down),
-        (LEFT, PceButton::Left),
-        (RIGHT, PceButton::Right),
-        (A, PceButton::Button1),
-        (B, PceButton::Button2),
-        (Y, PceButton::Button3),
-        (X, PceButton::Button4),
-        (L, PceButton::Button5),
-        (R, PceButton::Button6),
-        (START, PceButton::Run),
-        (SELECT, PceButton::Select),
+    const BUTTONS: &'static [(u32, PceButton, &'static CStr)] = &[
+        (UP, PceButton::Up, c"Up"),
+        (DOWN, PceButton::Down, c"Down"),
+        (LEFT, PceButton::Left, c"Left"),
+        (RIGHT, PceButton::Right, c"Right"),
+        (A, PceButton::Button1, c"I"),
+        (B, PceButton::Button2, c"II"),
+        (Y, PceButton::Button3, c"III"),
+        (X, PceButton::Button4, c"IV"),
+        (L, PceButton::Button5, c"V"),
+        (R, PceButton::Button6, c"VI"),
+        (START, PceButton::Run, c"Run"),
+        (SELECT, PceButton::Select, c"Select"),
     ];
 
     const MAX_FRAME_SIZE: (u32, u32) = (512, 242);

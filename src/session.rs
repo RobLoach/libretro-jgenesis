@@ -1,7 +1,10 @@
 //! A running game: one jgenesis emulator plus the buffers that connect it to libretro.
 
 use crate::env;
-use crate::ffi::{RetroGameGeometry, RetroSystemAvInfo, RetroSystemTiming};
+use crate::ffi::{
+    self, RetroControllerDescription, RetroControllerInfo, RetroGameGeometry, RetroInputDescriptor,
+    RetroSystemAvInfo, RetroSystemTiming,
+};
 use crate::frontend::{self, AudioBuffer, SaveFiles, VideoOutput};
 use crate::options::Options;
 use cdrom::reader::CdRom;
@@ -9,6 +12,8 @@ use jgenesis_common::frontend::{
     ConstantInputPoller, EmulatorTrait, FrameSize, MappableInputs, TickEffect,
 };
 use jgenesis_common::input::Player;
+use std::ffi::{CStr, c_uint};
+use std::ptr;
 
 pub const AUDIO_SAMPLE_RATE: u32 = 48_000;
 
@@ -28,8 +33,13 @@ pub trait System: EmulatorTrait + Sized {
     /// Number of controller ports
     const PORTS: usize;
 
-    /// Mapping from `RETRO_DEVICE_ID_JOYPAD_*` to emulator buttons
-    const BUTTONS: &'static [(u32, Self::Button)];
+    /// Mapping from `RETRO_DEVICE_ID_JOYPAD_*` to emulator buttons, with the button's label
+    const BUTTONS: &'static [(u32, Self::Button, &'static CStr)];
+
+    /// Controller types offered on every port; only systems that implement `set_controller` should
+    /// offer more than one
+    const CONTROLLER_TYPES: &'static [(&'static CStr, u32)] =
+        &[(c"Gamepad", ffi::RETRO_DEVICE_JOYPAD)];
 
     /// Initial maximum frame size; grown at runtime if the emulator renders a larger frame
     const MAX_FRAME_SIZE: (u32, u32);
@@ -123,6 +133,8 @@ impl<E: System> Session<E> {
             },
         };
 
+        Self::register_inputs();
+
         Ok(Self {
             emulator,
             base_config,
@@ -137,12 +149,61 @@ impl<E: System> Session<E> {
         })
     }
 
+    /// Tell the frontend each port's button labels and controller types. The frontend copies the
+    /// arrays.
+    fn register_inputs() {
+        let descriptors: Vec<_> = (0..E::PORTS as c_uint)
+            .flat_map(|port| {
+                E::BUTTONS.iter().map(move |&(id, _, label)| RetroInputDescriptor {
+                    port,
+                    device: ffi::RETRO_DEVICE_JOYPAD,
+                    index: 0,
+                    id,
+                    description: label.as_ptr(),
+                })
+            })
+            .chain([RetroInputDescriptor {
+                port: 0,
+                device: 0,
+                index: 0,
+                id: 0,
+                description: ptr::null(),
+            }])
+            .collect();
+        // SAFETY: SET_INPUT_DESCRIPTORS takes a NULL-terminated retro_input_descriptor array
+        unsafe {
+            env::environment(
+                ffi::RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS,
+                descriptors.as_ptr().cast_mut().cast(),
+            );
+        }
+
+        let types: Vec<_> = E::CONTROLLER_TYPES
+            .iter()
+            .map(|&(desc, id)| RetroControllerDescription { desc: desc.as_ptr(), id })
+            .collect();
+        let ports: Vec<_> = (0..E::PORTS)
+            .map(|_| RetroControllerInfo {
+                types: types.as_ptr(),
+                num_types: types.len() as c_uint,
+            })
+            .chain([RetroControllerInfo { types: ptr::null(), num_types: 0 }])
+            .collect();
+        // SAFETY: SET_CONTROLLER_INFO takes a NULL-terminated retro_controller_info array
+        unsafe {
+            env::environment(
+                ffi::RETRO_ENVIRONMENT_SET_CONTROLLER_INFO,
+                ports.as_ptr().cast_mut().cast(),
+            );
+        }
+    }
+
     fn poll_inputs(&mut self) {
         env::input_poll();
 
         for (port, &player) in PLAYERS.iter().enumerate().take(E::PORTS) {
             let buttons = env::joypad_buttons(port as u32);
-            for &(id, button) in E::BUTTONS {
+            for &(id, button, _) in E::BUTTONS {
                 self.inputs.set_field(button, player, buttons & (1 << id) != 0);
             }
         }
