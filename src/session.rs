@@ -187,29 +187,59 @@ impl<E: System> Session<E> {
         }
     }
 
-    fn encode_state(&self, out: &mut Vec<u8>) -> Result<(), String> {
+    /// Save state header: magic, then the length-prefixed save state version string.
+    /// The u32 payload length follows the header.
+    fn state_header() -> Vec<u8> {
         let version = E::save_state_version().as_bytes();
+        let mut header = Vec::with_capacity(STATE_MAGIC.len() + 1 + version.len());
+        header.extend_from_slice(STATE_MAGIC);
+        header.push(version.len() as u8);
+        header.extend_from_slice(version);
+        header
+    }
 
-        out.clear();
-        out.extend_from_slice(STATE_MAGIC);
-        out.push(version.len() as u8);
-        out.extend_from_slice(version);
+    /// Encode the current state directly into `out`, returning the number of bytes written, or
+    /// None if `out` is too small.
+    fn encode_state_into(&self, out: &mut [u8]) -> Result<Option<usize>, String> {
+        let header = Self::state_header();
+        let payload_offset = header.len() + 4;
+        if out.len() < payload_offset {
+            return Ok(None);
+        }
 
-        let len_offset = out.len();
-        out.extend_from_slice(&[0; 4]);
-
-        let payload_offset = out.len();
-        bincode::encode_into_std_write(
+        let payload_len = match bincode::encode_into_slice(
             self.emulator.to_save_state(),
-            out,
+            &mut out[payload_offset..],
+            frontend::bincode_config(),
+        ) {
+            Ok(len) => len,
+            Err(bincode::error::EncodeError::UnexpectedEnd) => return Ok(None),
+            Err(err) => return Err(format!("Error encoding save state: {err}")),
+        };
+
+        out[..header.len()].copy_from_slice(&header);
+        out[header.len()..payload_offset].copy_from_slice(&(payload_len as u32).to_le_bytes());
+
+        Ok(Some(payload_offset + payload_len))
+    }
+
+    /// Total encoded size of the current state, including the header.
+    fn encoded_state_len(&self) -> Result<usize, String> {
+        let mut writer = bincode::enc::write::SizeWriter::default();
+        bincode::encode_into_writer(
+            self.emulator.to_save_state(),
+            &mut writer,
             frontend::bincode_config(),
         )
         .map_err(|err| format!("Error encoding save state: {err}"))?;
 
-        let payload_len = (out.len() - payload_offset) as u32;
-        out[len_offset..payload_offset].copy_from_slice(&payload_len.to_le_bytes());
+        Ok(Self::state_header().len() + 4 + writer.bytes_written)
+    }
 
-        Ok(())
+    /// Reported state size: leave headroom because the encoded size can vary slightly (e.g.
+    /// Option fields), and frontends expect it to stay constant for rewind and netplay.
+    fn padded_state_size(len: usize) -> usize {
+        (len + len / 4).next_multiple_of(4096)
     }
 }
 
@@ -278,13 +308,8 @@ impl<E: System> CoreSession for Session<E> {
 
     fn serialize_size(&mut self) -> usize {
         if self.state_size == 0 {
-            let mut buffer = Vec::new();
-            match self.encode_state(&mut buffer) {
-                // Leave headroom because encoded size can vary slightly (e.g. Option fields), and
-                // frontends expect the size to stay constant for rewind and netplay
-                Ok(()) => {
-                    self.state_size = (buffer.len() + buffer.len() / 4).next_multiple_of(4096);
-                }
+            match self.encoded_state_len() {
+                Ok(len) => self.state_size = Self::padded_state_size(len),
                 Err(err) => log::error!("{err}"),
             }
         }
@@ -292,25 +317,26 @@ impl<E: System> CoreSession for Session<E> {
     }
 
     fn serialize(&mut self, out: &mut [u8]) -> bool {
-        let mut buffer = Vec::with_capacity(out.len());
-        if let Err(err) = self.encode_state(&mut buffer) {
-            log::error!("{err}");
-            return false;
+        match self.encode_state_into(out) {
+            Ok(Some(len)) => {
+                out[len..].fill(0);
+                true
+            }
+            Ok(None) => {
+                // Grow the reported size so the frontend's next buffer is large enough
+                let len = self.encoded_state_len().unwrap_or(out.len() * 2);
+                log::warn!(
+                    "Save state is {len} bytes, larger than the {}-byte buffer; growing reported size",
+                    out.len()
+                );
+                self.state_size = Self::padded_state_size(len);
+                false
+            }
+            Err(err) => {
+                log::error!("{err}");
+                false
+            }
         }
-
-        if buffer.len() > out.len() {
-            log::warn!(
-                "Save state is {} bytes, larger than the {}-byte buffer; growing reported size",
-                buffer.len(),
-                out.len()
-            );
-            self.state_size = (buffer.len() + buffer.len() / 4).next_multiple_of(4096);
-            return false;
-        }
-
-        out[..buffer.len()].copy_from_slice(&buffer);
-        out[buffer.len()..].fill(0);
-        true
     }
 
     fn unserialize(&mut self, data: &[u8]) -> Result<(), String> {
