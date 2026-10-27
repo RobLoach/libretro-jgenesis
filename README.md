@@ -6,15 +6,15 @@ A [libretro](https://www.libretro.com/) core for [jgenesis](https://github.com/j
 
 | System | Extensions | Firmware |
 |---|---|---|
-| Sega Genesis / Mega Drive | `gen` `md` `bin` `smd` | — |
+| Sega Genesis / Mega Drive | `gen` `md` `bin` `smd` | None |
 | Sega CD / Mega CD | `cue` `chd` `m3u` | `bios_CD_U.bin`, `bios_CD_E.bin`, `bios_CD_J.bin` (matching the disc's region) |
-| Sega 32X, Sega CD 32X | `32x` `bin`, `cue` `chd` | 32X: none. Sega CD 32X: Sega CD BIOS |
-| Master System, Game Gear, SG-1000 | `sms` `gg` `sg` | — |
-| NES / Famicom | `nes` | — |
-| SNES / Super Famicom | `sfc` `smc` | `dsp1.rom`–`dsp4.rom`, `st010.rom`, `st011.rom`, `st018.rom`, only for games that use those chips |
-| Game Boy, Game Boy Color | `gb` `gbc` | — |
-| Game Boy Advance | `gba` `bin` | `gba_bios.bin` (required) |
-| PC Engine / TurboGrafx-16 | `pce` | — |
+| Sega 32X, Sega CD 32X | `32x` `bin`, `cue` `chd` | 32X: None. Sega CD 32X: Sega CD BIOS |
+| Master System, Game Gear, SG-1000 | `sms` `gg` `sg` | None |
+| NES / Famicom | `nes` | None |
+| SNES / Super Famicom | `sfc` `smc` | `dsp1.rom`–`dsp4.rom`, `st010.rom`, `st011.rom`, `st018.rom`, for games that use those chips |
+| Game Boy, Game Boy Color | `gb` `gbc` | None |
+| Game Boy Advance | `gba` `bin` | `gba_bios.bin` |
+| PC Engine / TurboGrafx-16 | `pce` | None |
 | PC Engine CD / TurboGrafx-CD | `cue` `chd` | `syscard3.pce` |
 
 The system is detected from the file extension and contents:
