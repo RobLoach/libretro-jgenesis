@@ -42,14 +42,15 @@ HOST_ARCH := $(shell uname -m)
 ARCH ?= $(HOST_ARCH)
 
 # Normalize architecture names
+# (override: ARCH is usually passed on the command line, which would otherwise take precedence)
 ifneq ($(filter $(ARCH),amd64 x64 x86_64),)
-  ARCH := x86_64
+  override ARCH := x86_64
 else ifneq ($(filter $(ARCH),i386 i486 i586 i686 x86),)
-  ARCH := i686
+  override ARCH := i686
 else ifneq ($(filter $(ARCH),arm64 aarch64),)
-  ARCH := aarch64
+  override ARCH := aarch64
 else ifneq ($(filter $(ARCH),arm armv7 armv7l armv7a armhf),)
-  ARCH := armv7
+  override ARCH := armv7
 endif
 
 ifneq ($(filter $(platform),unix linux),)
@@ -64,9 +65,9 @@ ifneq ($(filter $(platform),unix linux),)
 
 else ifneq ($(filter $(platform),win win32 win64 windows mingw mingw64),)
   ifeq ($(platform),win32)
-    ARCH := i686
+    override ARCH := i686
   else ifeq ($(platform),win64)
-    ARCH := x86_64
+    override ARCH := x86_64
   endif
   TARGET ?= $(ARCH)-pc-windows-gnu
   BUILT_LIB := $(CORENAME)_libretro.dll

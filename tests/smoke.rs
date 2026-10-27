@@ -148,11 +148,16 @@ unsafe extern "C" fn input_state(
 }
 
 fn core_path() -> PathBuf {
-    // Test binaries live in target/<profile>/deps; the cdylib is in target/<profile>
+    // Test binaries live in target/<profile>/deps. `cargo test` builds the cdylib there too (it's
+    // only copied up to target/<profile> by `cargo build`), so prefer that fresh copy.
     let exe = env::current_exe().unwrap();
-    let dir = exe.parent().unwrap().parent().unwrap();
+    let deps_dir = exe.parent().unwrap();
     let name = format!("{}jgenesis_libretro{}", env::consts::DLL_PREFIX, env::consts::DLL_SUFFIX);
-    dir.join(name)
+    [deps_dir, deps_dir.parent().unwrap()]
+        .into_iter()
+        .map(|dir| dir.join(&name))
+        .find(|path| path.exists())
+        .unwrap_or_else(|| deps_dir.join(&name))
 }
 
 struct Core {
