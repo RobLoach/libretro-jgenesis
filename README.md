@@ -22,7 +22,7 @@ A [libretro](https://www.libretro.com/) core for [jgenesis](https://github.com/j
 
 1. Build the core (see [Development](#development)), or download a build
 2. Copy `jgenesis_libretro.so` / `.dll` / `.dylib` into RetroArch's `cores` directory
-3. Copy [`jgenesis_libretro.info`](jgenesis_libretro.info) into RetroArch's `info` directory
+3. Copy [`jgenesis_libretro.info`](jgenesis_libretro.info) into RetroArch's `cores` directory too
 4. Put firmware files in RetroArch's `system` directory
 5. Load content with *Load Core → jgenesis*
 
