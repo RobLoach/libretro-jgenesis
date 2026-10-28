@@ -1,10 +1,11 @@
 //! Safe wrappers around the callbacks that the frontend hands to the core.
 
 use crate::ffi::{
-    self, RetroAudioSampleBatchFn, RetroEnvironmentFn, RetroGameGeometry, RetroInputPollFn,
-    RetroInputStateFn, RetroLogPrintfFn, RetroSystemAvInfo, RetroVideoRefreshFn,
+    self, RetroAudioSampleBatchFloatFn, RetroAudioSampleBatchFn, RetroEnvironmentFn,
+    RetroGameGeometry, RetroInputPollFn, RetroInputStateFn, RetroLogPrintfFn, RetroSystemAvInfo,
+    RetroVideoRefreshFn,
 };
-use std::ffi::{CStr, CString, c_char, c_uint, c_void};
+use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::path::PathBuf;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,6 +16,8 @@ struct Callbacks {
     environment: Option<RetroEnvironmentFn>,
     video_refresh: Option<RetroVideoRefreshFn>,
     audio_sample_batch: Option<RetroAudioSampleBatchFn>,
+    /// Negotiated per loaded game; when set, all audio goes through it instead of int16
+    audio_sample_batch_float: Option<RetroAudioSampleBatchFloatFn>,
     input_poll: Option<RetroInputPollFn>,
     input_state: Option<RetroInputStateFn>,
     log: Option<RetroLogPrintfFn>,
@@ -24,12 +27,14 @@ static CALLBACKS: RwLock<Callbacks> = RwLock::new(Callbacks {
     environment: None,
     video_refresh: None,
     audio_sample_batch: None,
+    audio_sample_batch_float: None,
     input_poll: None,
     input_state: None,
     log: None,
 });
 
 static SUPPORTS_INPUT_BITMASKS: AtomicBool = AtomicBool::new(false);
+static CAN_DUPE: AtomicBool = AtomicBool::new(false);
 
 fn callbacks() -> Callbacks {
     *CALLBACKS.read().unwrap_or_else(PoisonError::into_inner)
@@ -72,7 +77,7 @@ pub unsafe fn environment(cmd: c_uint, data: *mut c_void) -> bool {
     }
 }
 
-/// Query the frontend's log interface and the input bitmask extension.
+/// Query the frontend's log interface, input bitmask extension, and frame duping support.
 pub fn init_frontend_interfaces() {
     let mut log_callback = ffi::RetroLogCallback { log: None };
     // SAFETY: GET_LOG_INTERFACE takes a retro_log_callback*
@@ -87,6 +92,12 @@ pub fn init_frontend_interfaces() {
     let bitmasks =
         unsafe { environment(ffi::RETRO_ENVIRONMENT_GET_INPUT_BITMASKS, ptr::null_mut()) };
     SUPPORTS_INPUT_BITMASKS.store(bitmasks, Ordering::Relaxed);
+
+    let mut can_dupe = false;
+    // SAFETY: GET_CAN_DUPE takes a bool*
+    let ok =
+        unsafe { environment(ffi::RETRO_ENVIRONMENT_GET_CAN_DUPE, (&raw mut can_dupe).cast()) };
+    CAN_DUPE.store(ok && can_dupe, Ordering::Relaxed);
 
     Logger::install();
 }
@@ -111,6 +122,88 @@ pub fn system_directory() -> Option<PathBuf> {
 
 pub fn save_directory() -> Option<PathBuf> {
     get_directory(ffi::RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY)
+}
+
+/// Save state size can grow during a session (see `Session::serialize`). Must be called from
+/// `retro_init`.
+pub fn set_serialization_quirks() {
+    let mut quirks = ffi::RETRO_SERIALIZATION_QUIRK_CORE_VARIABLE_SIZE;
+    // SAFETY: SET_SERIALIZATION_QUIRKS takes a uint64_t*
+    let ok = unsafe {
+        environment(ffi::RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS, (&raw mut quirks).cast())
+    };
+    if ok && quirks & ffi::RETRO_SERIALIZATION_QUIRK_FRONT_VARIABLE_SIZE == 0 {
+        // Not a problem: Session pads the reported size so that it rarely needs to grow
+        log::info!("Frontend does not support variable-size save states");
+    }
+}
+
+/// Outputs the frontend wants for the current frame. Disabled outputs will be discarded, e.g.
+/// for frames that run-ahead runs but never shows.
+#[derive(Debug, Clone, Copy)]
+pub struct AvEnable {
+    pub video: bool,
+    pub audio: bool,
+}
+
+pub fn audio_video_enable() -> AvEnable {
+    let mut flags: c_int = 0;
+    // SAFETY: GET_AUDIO_VIDEO_ENABLE takes an int* (retro_av_enable_flags)
+    let ok = unsafe {
+        environment(ffi::RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE, (&raw mut flags).cast())
+    };
+    if !ok {
+        return AvEnable { video: true, audio: true };
+    }
+
+    AvEnable {
+        video: flags & ffi::RETRO_AV_ENABLE_VIDEO != 0,
+        audio: flags & ffi::RETRO_AV_ENABLE_AUDIO != 0,
+    }
+}
+
+/// Content details from `GET_GAME_INFO_EXT`, copied out because the frontend's strings are only
+/// valid during `retro_load_game`.
+pub struct GameInfoExt {
+    /// Path to the content file on disk; may be absent when the content is inside an archive
+    pub full_path: Option<String>,
+    /// Directory containing the content file, or the archive it is inside
+    pub dir: Option<String>,
+    /// Content name without extension (`RetroArch` uses the archive's name for archived content)
+    pub name: Option<String>,
+    /// Lowercase extension of the content file, without the dot
+    pub ext: Option<String>,
+}
+
+fn owned_string(s: *const c_char) -> Option<String> {
+    if s.is_null() {
+        return None;
+    }
+
+    // SAFETY: Frontend strings are NUL-terminated
+    let s = unsafe { CStr::from_ptr(s) }.to_str().ok()?;
+    (!s.is_empty()).then(|| s.to_owned())
+}
+
+/// Extended info for the content being loaded. Only valid to call from `retro_load_game`.
+pub fn game_info_ext() -> Option<GameInfoExt> {
+    let mut info: *const ffi::RetroGameInfoExt = ptr::null();
+    // SAFETY: GET_GAME_INFO_EXT takes a const retro_game_info_ext**
+    let ok =
+        unsafe { environment(ffi::RETRO_ENVIRONMENT_GET_GAME_INFO_EXT, (&raw mut info).cast()) };
+    if !ok || info.is_null() {
+        return None;
+    }
+
+    // SAFETY: Frontend returned a pointer to an array of retro_game_info_ext, whose first entry
+    // is the loaded content
+    let info = unsafe { &*info };
+    Some(GameInfoExt {
+        full_path: owned_string(info.full_path),
+        dir: owned_string(info.dir),
+        name: owned_string(info.name),
+        ext: owned_string(info.ext),
+    })
 }
 
 pub fn get_variable(key: &CStr) -> Option<String> {
@@ -161,9 +254,19 @@ pub fn show_message(msg: &str, frames: c_uint) {
     }
 }
 
+/// Whether the frontend accepts a NULL frame to repeat the previous one. Callers must resend the
+/// last frame instead when it doesn't.
+pub fn can_dupe() -> bool {
+    CAN_DUPE.load(Ordering::Relaxed)
+}
+
 /// Send a frame of XRGB8888 pixels to the frontend, or dupe the last frame if `frame` is None.
+/// Dupes are dropped if the frontend doesn't support them (see [`can_dupe`]).
 pub fn video_refresh(frame: Option<&[u32]>, width: u32, height: u32) {
     let Some(video_refresh) = callbacks().video_refresh else { return };
+    if frame.is_none() && !can_dupe() {
+        return;
+    }
 
     let (data, pitch) = match frame {
         Some(frame) => (frame.as_ptr().cast::<c_void>(), width as usize * 4),
@@ -176,19 +279,74 @@ pub fn video_refresh(frame: Option<&[u32]>, width: u32, height: u32) {
     }
 }
 
-/// Send interleaved stereo samples to the frontend.
-pub fn audio_sample_batch(samples: &[i16]) {
-    let Some(audio_sample_batch) = callbacks().audio_sample_batch else { return };
+/// Use float audio for the loaded game if the frontend supports it. libretro requires this to be
+/// decided once, during `retro_load_game`.
+pub fn negotiate_float_audio() {
+    let mut callback = ffi::RetroAudioSampleFloatCallback { batch: None };
+    // SAFETY: GET_AUDIO_SAMPLE_BATCH_FLOAT takes a retro_audio_sample_float_callback*
+    let ok = unsafe {
+        environment(ffi::RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_FLOAT, (&raw mut callback).cast())
+    };
+    let batch = if ok { callback.batch } else { None };
+    update_callbacks(|callbacks| callbacks.audio_sample_batch_float = batch);
+    if batch.is_some() {
+        log::info!("Using float audio output");
+    }
+}
 
+/// The float callback is only valid until `retro_unload_game`.
+pub fn clear_float_audio() {
+    update_callbacks(|callbacks| callbacks.audio_sample_batch_float = None);
+}
+
+/// The frontend's output sample rate, so the emulator can resample straight to it instead of the
+/// frontend resampling a second time.
+pub fn target_sample_rate() -> Option<u32> {
+    let mut rate: c_uint = 0;
+    // SAFETY: GET_TARGET_SAMPLE_RATE takes an unsigned*
+    let ok = unsafe {
+        environment(ffi::RETRO_ENVIRONMENT_GET_TARGET_SAMPLE_RATE, (&raw mut rate).cast())
+    };
+    (ok && (8_000..=384_000).contains(&rate)).then_some(rate)
+}
+
+/// Send interleaved stereo samples in [-1, 1] to the frontend: as float if negotiated, otherwise
+/// converted to int16 in `scratch`.
+pub fn audio_sample_batch(samples: &[f32], scratch: &mut Vec<i16>) {
+    let callbacks = callbacks();
+
+    if let Some(batch) = callbacks.audio_sample_batch_float {
+        // SAFETY: Each chunk holds len / 2 interleaved stereo frames
+        send_audio(samples, |chunk| unsafe { batch(chunk.as_ptr(), chunk.len() / 2) });
+        return;
+    }
+
+    let Some(batch) = callbacks.audio_sample_batch else { return };
+    scratch.clear();
+    scratch.extend(samples.iter().map(|&sample| (sample * f32::from(i16::MAX)).round() as i16));
+    // SAFETY: Each chunk holds len / 2 interleaved stereo frames
+    send_audio(scratch, |chunk| unsafe { batch(chunk.as_ptr(), chunk.len() / 2) });
+}
+
+/// Frontends may accept fewer frames than offered; keep sending until done or stalled.
+fn send_audio<T>(samples: &[T], mut send: impl FnMut(&[T]) -> usize) {
     let mut remaining = samples;
     while remaining.len() >= 2 {
-        // SAFETY: remaining contains remaining.len() / 2 interleaved stereo frames
-        let written = unsafe { audio_sample_batch(remaining.as_ptr(), remaining.len() / 2) };
+        let written = send(remaining);
         if written == 0 {
             break;
         }
         remaining = &remaining[(2 * written).min(remaining.len())..];
     }
+}
+
+/// Number of ports the frontend currently has devices for, if it says.
+pub fn input_max_users() -> Option<usize> {
+    let mut users: c_uint = 0;
+    // SAFETY: GET_INPUT_MAX_USERS takes an unsigned*
+    let ok =
+        unsafe { environment(ffi::RETRO_ENVIRONMENT_GET_INPUT_MAX_USERS, (&raw mut users).cast()) };
+    ok.then_some(users as usize)
 }
 
 pub fn input_poll() {

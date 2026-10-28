@@ -15,7 +15,8 @@ use jgenesis_common::input::Player;
 use std::ffi::{CStr, c_uint};
 use std::ptr;
 
-pub const AUDIO_SAMPLE_RATE: u32 = 48_000;
+/// Output sample rate when the frontend doesn't report its own (`GET_TARGET_SAMPLE_RATE`)
+pub const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 
 const PLAYERS: [Player; 5] = [Player::One, Player::Two, Player::Three, Player::Four, Player::Five];
 
@@ -110,7 +111,8 @@ impl<E: System> Session<E> {
         E::apply_options(options, &mut config);
 
         let mut emulator = create(config.clone(), &mut saves)?;
-        emulator.update_audio_output_frequency(AUDIO_SAMPLE_RATE.into());
+        let sample_rate = env::target_sample_rate().unwrap_or(DEFAULT_SAMPLE_RATE);
+        emulator.update_audio_output_frequency(sample_rate.into());
 
         // Render the initial frame buffer to learn the frame size before the first retro_run
         let mut video = VideoOutput::default();
@@ -129,7 +131,7 @@ impl<E: System> Session<E> {
             },
             timing: RetroSystemTiming {
                 fps: emulator.target_fps(),
-                sample_rate: AUDIO_SAMPLE_RATE.into(),
+                sample_rate: sample_rate.into(),
             },
         };
 
@@ -201,8 +203,10 @@ impl<E: System> Session<E> {
     fn poll_inputs(&mut self) {
         env::input_poll();
 
+        // Ports beyond what the frontend has devices for read as released, without polling
+        let active_ports = env::input_max_users().unwrap_or(E::PORTS);
         for (port, &player) in PLAYERS.iter().enumerate().take(E::PORTS) {
-            let buttons = env::joypad_buttons(port as u32);
+            let buttons = if port < active_ports { env::joypad_buttons(port as u32) } else { 0 };
             for &(id, button, _) in E::BUTTONS {
                 self.inputs.set_field(button, player, buttons & (1 << id) != 0);
             }
@@ -318,6 +322,10 @@ impl<E: System> CoreSession for Session<E> {
     fn run_frame(&mut self) -> Result<(), String> {
         self.poll_inputs();
 
+        let av_enable = env::audio_video_enable();
+        self.video.skip_output = !av_enable.video;
+        self.audio.discard = !av_enable.audio;
+
         self.video.frame_rendered = false;
         self.audio.samples.clear();
 
@@ -339,20 +347,25 @@ impl<E: System> CoreSession for Session<E> {
             }
         }
 
-        if self.video.frame_rendered
-            && let Some(size) = self.video.size
-        {
+        if self.video.frame_rendered {
             self.update_av_info();
-            env::video_refresh(Some(&self.video.frame), size.width, size.height);
-        } else {
-            env::video_refresh(
+        }
+
+        // Send a new frame, or repeat the last one: as a dupe (NULL) if the frontend supports it,
+        // otherwise by sending the last frame's pixels again
+        let new_frame = self.video.frame_rendered && !self.video.skip_output;
+        match self.video.frame_size {
+            Some(size) if new_frame || !env::can_dupe() => {
+                env::video_refresh(Some(&self.video.frame), size.width, size.height);
+            }
+            _ => env::video_refresh(
                 None,
                 self.av_info.geometry.base_width,
                 self.av_info.geometry.base_height,
-            );
+            ),
         }
 
-        env::audio_sample_batch(&self.audio.samples);
+        env::audio_sample_batch(&self.audio.samples, &mut self.audio.int16_samples);
 
         self.update_saves();
 

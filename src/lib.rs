@@ -8,6 +8,7 @@ mod load;
 mod options;
 mod session;
 mod systems;
+mod vfs;
 
 use detect::Console;
 use ffi::{RetroGameInfo, RetroSystemAvInfo, RetroSystemContentInfoOverride, RetroSystemInfo};
@@ -21,8 +22,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::{ptr, slice};
 
 const LIBRARY_NAME: &CStr = c"jgenesis";
-const LIBRARY_VERSION: &CStr = c"0.14.1 (libretro 0.1.0)";
-const VALID_EXTENSIONS: &CStr = c"sg|sms|gg|gen|md|bin|smd|32x|nes|sfc|smc|gb|gbc|gba|pce|cue|chd|m3u";
+const LIBRARY_VERSION: &CStr = c"0.14.1";
+const VALID_EXTENSIONS: &CStr =
+    c"sg|sms|gg|gen|md|bin|smd|32x|nes|sfc|smc|gb|gbc|gba|pce|cue|chd|m3u";
 const FULLPATH_EXTENSIONS: &CStr = c"cue|chd|m3u";
 
 struct Game {
@@ -115,7 +117,7 @@ pub unsafe extern "C" fn retro_get_system_av_info(info: *mut RetroSystemAvInfo) 
             },
             timing: ffi::RetroSystemTiming {
                 fps: 60.0,
-                sample_rate: session::AUDIO_SAMPLE_RATE.into(),
+                sample_rate: session::DEFAULT_SAMPLE_RATE.into(),
             },
         });
 
@@ -133,6 +135,8 @@ pub unsafe extern "C" fn retro_set_environment(cb: Option<ffi::RetroEnvironmentF
     env::set_environment(cb);
 
     guard("retro_set_environment", (), || {
+        vfs::init();
+
         let overrides = [
             RetroSystemContentInfoOverride {
                 extensions: FULLPATH_EXTENSIONS.as_ptr(),
@@ -153,8 +157,68 @@ pub unsafe extern "C" fn retro_set_environment(cb: Option<ffi::RetroEnvironmentF
             );
         }
 
+        let mut support_no_game = true;
+        // SAFETY: SET_SUPPORT_NO_GAME takes a const bool*
+        unsafe {
+            env::environment(
+                ffi::RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME,
+                (&raw mut support_no_game).cast(),
+            );
+        }
+
+        register_subsystems();
         options::register();
     });
+}
+
+/// `retro_load_game_special` game type for a cartridge booted with a Sega CD disc
+const SUBSYSTEM_SEGA_CD_MODE_1: c_uint = 1;
+
+fn register_subsystems() {
+    let roms = [
+        ffi::RetroSubsystemRomInfo {
+            desc: c"Cartridge".as_ptr(),
+            valid_extensions: c"gen|md|bin|smd|32x".as_ptr(),
+            need_fullpath: false,
+            block_extract: false,
+            required: true,
+            memory: ptr::null(),
+            num_memory: 0,
+        },
+        ffi::RetroSubsystemRomInfo {
+            desc: c"Disc".as_ptr(),
+            valid_extensions: c"cue|chd".as_ptr(),
+            need_fullpath: true,
+            block_extract: true,
+            required: true,
+            memory: ptr::null(),
+            num_memory: 0,
+        },
+    ];
+    let subsystems = [
+        ffi::RetroSubsystemInfo {
+            desc: c"Sega CD Mode 1 (Cartridge + Disc)".as_ptr(),
+            ident: c"scd_mode1".as_ptr(),
+            roms: roms.as_ptr(),
+            num_roms: roms.len() as c_uint,
+            id: SUBSYSTEM_SEGA_CD_MODE_1,
+        },
+        ffi::RetroSubsystemInfo {
+            desc: ptr::null(),
+            ident: ptr::null(),
+            roms: ptr::null(),
+            num_roms: 0,
+            id: 0,
+        },
+    ];
+    // SAFETY: SET_SUBSYSTEM_INFO takes a zero-terminated retro_subsystem_info array, which the
+    // frontend copies
+    unsafe {
+        env::environment(
+            ffi::RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO,
+            subsystems.as_ptr().cast_mut().cast(),
+        );
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -184,6 +248,10 @@ pub extern "C" fn retro_set_input_state(cb: Option<ffi::RetroInputStateFn>) {
 pub extern "C" fn retro_init() {
     guard("retro_init", (), || {
         env::init_frontend_interfaces();
+        env::set_serialization_quirks();
+        if vfs::is_available() {
+            log::info!("Using the frontend's virtual file system");
+        }
         panic::set_hook(Box::new(|info| log::error!("{info}")));
     });
 }
@@ -196,26 +264,24 @@ pub extern "C" fn retro_deinit() {
     });
 }
 
+/// Path and data from a `retro_game_info`.
+///
 /// # Safety
 ///
-/// `game` must be NULL or a valid pointer to a `retro_game_info`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn retro_load_game(game: *const RetroGameInfo) -> bool {
-    if game.is_null() {
-        log::error!("jgenesis requires content to be loaded");
-        return false;
-    }
-
-    // SAFETY: Checked non-null above; frontend guarantees validity for the duration of this call
-    let game = unsafe { &*game };
+/// `game` must be a valid `retro_game_info`.
+unsafe fn game_path_and_data(game: &RetroGameInfo) -> (Option<String>, Option<&[u8]>) {
     let path = (!game.path.is_null())
         // SAFETY: Frontend provides a NUL-terminated path string
         .then(|| unsafe { CStr::from_ptr(game.path) }.to_string_lossy().into_owned());
     let data = (!game.data.is_null() && game.size != 0)
         // SAFETY: Frontend provides a buffer of game.size bytes
         .then(|| unsafe { slice::from_raw_parts(game.data.cast::<u8>(), game.size) });
+    (path, data)
+}
 
-    guard("retro_load_game", false, || {
+/// Shared by `retro_load_game` and `retro_load_game_special`.
+fn start_game(name: &str, load: impl FnOnce() -> Result<LoadedGame, String>) -> bool {
+    guard(name, false, || {
         let mut pixel_format = ffi::RETRO_PIXEL_FORMAT_XRGB8888;
         // SAFETY: SET_PIXEL_FORMAT takes a const enum retro_pixel_format*
         let ok = unsafe {
@@ -229,7 +295,7 @@ pub unsafe extern "C" fn retro_load_game(game: *const RetroGameInfo) -> bool {
             return false;
         }
 
-        let loaded = match load::load_game(path.as_deref(), data) {
+        let loaded = match load() {
             Ok(loaded) => loaded,
             Err(err) => {
                 log::error!("{err}");
@@ -243,7 +309,10 @@ pub unsafe extern "C" fn retro_load_game(game: *const RetroGameInfo) -> bool {
         }
 
         set_av_info(Some(loaded.session.av_info()));
-        core().game = Some(Game { loaded, disc_index: 0, disc_ejected: false });
+        // With no disc to start with (running the Sega CD BIOS), the drive starts open
+        let disc_ejected = loaded.discs.is_empty();
+        core().game = Some(Game { loaded, disc_index: 0, disc_ejected });
+        env::negotiate_float_audio();
 
         true
     })
@@ -251,14 +320,42 @@ pub unsafe extern "C" fn retro_load_game(game: *const RetroGameInfo) -> bool {
 
 /// # Safety
 ///
-/// Unsupported; always returns false.
+/// `game` must be NULL or a valid pointer to a `retro_game_info`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn retro_load_game(game: *const RetroGameInfo) -> bool {
+    if game.is_null() {
+        return start_game("retro_load_game", load::load_no_game);
+    }
+
+    // SAFETY: Checked non-null above; frontend guarantees validity for the duration of this call
+    let (path, data) = unsafe { game_path_and_data(&*game) };
+    start_game("retro_load_game", || load::load_game(path.as_deref(), data))
+}
+
+/// # Safety
+///
+/// `info` must be a valid pointer to `num_info` `retro_game_info`s.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn retro_load_game_special(
-    _game_type: c_uint,
-    _info: *const RetroGameInfo,
-    _num_info: usize,
+    game_type: c_uint,
+    info: *const RetroGameInfo,
+    num_info: usize,
 ) -> bool {
-    false
+    if game_type != SUBSYSTEM_SEGA_CD_MODE_1 || info.is_null() || num_info != 2 {
+        log::error!("Unsupported subsystem {game_type} with {num_info} content files");
+        return false;
+    }
+
+    // SAFETY: Checked non-null above; frontend provides num_info entries
+    let info = unsafe { slice::from_raw_parts(info, num_info) };
+    // SAFETY: Frontend guarantees validity for the duration of this call
+    let (cartridge_path, cartridge_data) = unsafe { game_path_and_data(&info[0]) };
+    // SAFETY: As above
+    let (disc_path, _) = unsafe { game_path_and_data(&info[1]) };
+
+    start_game("retro_load_game_special", || {
+        load::load_sega_cd_mode_1(cartridge_path.as_deref(), cartridge_data, disc_path.as_deref())
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -267,6 +364,7 @@ pub extern "C" fn retro_unload_game() {
         if let Some(mut game) = core().game.take() {
             game.loaded.session.flush_saves();
         }
+        env::clear_float_audio();
         set_av_info(None);
     });
 }

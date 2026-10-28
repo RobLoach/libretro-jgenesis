@@ -1,6 +1,6 @@
 # libretro-jgenesis
 
-A [libretro](https://www.libretro.com/) core for the [jgenesis](https://github.com/jsgroth/jgenesis) emulator, originally developed by [jsgroth](https://github.com/jsgroth).
+A [libretro](https://www.libretro.com/) core for [jgenesis](https://github.com/jsgroth/jgenesis), the multi-console emulator by [jsgroth](https://github.com/jsgroth).
 
 ## Systems
 
@@ -8,44 +8,75 @@ A [libretro](https://www.libretro.com/) core for the [jgenesis](https://github.c
 |---|---|---|
 | Sega Genesis / Mega Drive | `gen` `md` `bin` `smd` | None |
 | Sega CD / Mega CD | `cue` `chd` `m3u` | `bios_CD_U.bin`, `bios_CD_E.bin`, `bios_CD_J.bin` |
-| Sega 32X, Sega CD 32X | `32x` `bin`, `cue` `chd` | Sega CD BIOS |
+| Sega 32X | `32x` `bin` | None |
+| Sega CD 32X | `cue` `chd` `m3u` | Sega CD BIOS |
 | Master System, Game Gear, SG-1000 | `sms` `gg` `sg` | None |
 | NES / Famicom | `nes` | None |
-| SNES / Super Famicom | `sfc` `smc` | `dsp1.rom`–`dsp4.rom`, `st010.rom`, `st011.rom`, `st018.rom` |
+| SNES / Super Famicom | `sfc` `smc` | `dsp1.rom`-`dsp4.rom`, `st010.rom`, `st011.rom`, `st018.rom` for coprocessor games |
 | Game Boy, Game Boy Color | `gb` `gbc` | None |
 | Game Boy Advance | `gba` `bin` | `gba_bios.bin` |
 | PC Engine / TurboGrafx-16 | `pce` | None |
-| PC Engine CD / TurboGrafx-CD | `cue` `chd` | `syscard3.pce` |
+| PC Engine CD / TurboGrafx-CD | `cue` `chd` `m3u` | `syscard3.pce` |
 
-The system is detected from the file extension and contents:
-- Genesis/32X/Sega CD headers
-- GBA headers for `.bin`
-- Sega CD vs. PC Engine CD for disc images
+## Installation
+
+1. Build the core (see [Development](#development)), or download a build
+2. Copy `jgenesis_libretro.so` / `.dll` / `.dylib` into RetroArch's `cores` directory
+3. Copy [`jgenesis_libretro.info`](jgenesis_libretro.info) into RetroArch's `info` directory
+4. Put firmware files in RetroArch's `system` directory
+5. Load content with *Load Core → jgenesis*
 
 ## Usage
 
-1. Build the core (below), or download a build
-2. Copy `jgenesis_libretro.so` / `.dll` / `.dylib` into RetroArch's `cores` directory
-3. Copy [`jgenesis_libretro.info`](jgenesis_libretro.info) into its `cores` directory too
-4. Load content with *Load Core → jgenesis*.
+Some additional points around using libretro-jgenesis...
+
+### System Selection
+
+The system is picked from the file extension, then refined from the contents:
+- `.bin` is a GBA ROM if it has a GBA header, otherwise Genesis
+- Genesis ROM headers identify 32X and Sega CD-capable cartridges
+- Disc images are identified as Sega CD, Sega CD 32X, or PC Engine CD
+
+### Discs
+
+- **Formats:** load discs as `.cue`, `.chd`, or `.m3u` playlist for multi-disc games
+- **Disc swapping:** works through RetroArch's *Disc Control* menu
+- **Zipped CUE/BIN images don't work.** RetroArch only extracts or loads one file from the archive, so the BIN tracks are missing. Unzip them, or convert to CHD.
+
+### Sega CD Mode 1
+
+The *Sega CD Mode 1 (Cartridge + Disc)* subsystem boots a Genesis or 32X cartridge with the Sega CD attached and a disc inserted.
+
+From the command line:
+
+```sh
+retroarch -L jgenesis_libretro.so --subsystem=scd_mode1 game.md disc.cue
+```
 
 ### Saves
 
-Battery saves are written to the frontend's save directory as `<game>.<ext>`, using the same file names and formats as standalone jgenesis, so you can move saves between the two. The core writes these files itself, because several systems keep more than one save file (Sega CD backup RAM and RAM cartridge, GBA RTC). This means libretro's single `SAVE_RAM` buffer isn't used, and frontend features built on it (e.g. netplay SRAM sync) won't see the saves.
+The core writes battery saves itself:
+- **File names:** `<game>.sav`, plus `.rtc` for cartridges with a clock and `.ramc` for the Sega CD RAM cartridge.
+- **Location:** saves go in the save directory RetroArch provides. RetroArch's *sort by core*, *sort by content directory*, and *save files in content directory* settings all apply.
 
-Save states and rewind are supported. Save states are tied to the jgenesis version the core was built from.
+See [#8](https://github.com/RobLoach/libretro-jgenesis/issues/8) for improvements for `SAVE_RAM` memory.
 
-### Controls
+### Frontend features
 
-All systems use the RetroPad. Genesis follows Genesis Plus GX's layout: Y/B/A are A/B/C, L/X/R are X/Y/Z, and Select is Mode. Each Genesis port can be set to a 6-button pad (the default), a 3-button pad, or nothing. PC Engine follows Beetle PCE's layout: A/B are I/II. The TurboTap core option enables 5 players.
+- **File access:** goes through the frontend's virtual file system (VFS) when it has one
+  - CUE/BIN discs are still read directly from disk, so they don't load from `smb://` / `nfs://` shares or other VFS-only locations yet ([#12](https://github.com/RobLoach/libretro-jgenesis/issues/12))
+  - With a VFS, CHD images are read fully into memory
+- **Audio:** goes out at the frontend's output sample rate, as float samples when the frontend supports it
+- **Run-ahead:** frames the frontend won't show skip video and audio conversion
+- **Core options:** settings for each system have their own category
 
 ## Development
 
-Requires Rust 1.99.1 or newer, pinned in `rust-toolchain.toml`, and a C compiler for the zstd library used to read CHD images.
+Requires the Rust toolchain pinned in `rust-toolchain.toml` (1.99.1), and a C compiler for the zstd library used to read CHD images.
 
 ```sh
-make -f Makefile.libretro                # host platform
-cargo test --release                     # unit tests + a smoke test that loads the built core
+make -f Makefile.libretro   # build jgenesis_libretro.so for the host platform
+cargo test                  # unit tests, plus smoke tests that load the built core
 ```
 
 `Makefile.libretro` maps libretro platform names to Rust targets:
@@ -63,12 +94,23 @@ cargo test --release                     # unit tests + a smoke test that loads 
 
 For Linux cross builds without a cross toolchain, use [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild): `make -f Makefile.libretro platform=unix ARCH=aarch64 CARGO_BUILD=zigbuild GLIBC=2.28`. `jni/` holds an `ndk-build` shim for libretro's Android CI template.
 
-To test against real content, set `JGENESIS_TEST_ROMS` (paths separated by `;`) and `JGENESIS_TEST_SYSTEM_DIR` (a BIOS directory) before running `cargo test --release`.
+### Tests
+
+The smoke tests (`tests/smoke.rs`) load the built core and drive it like a minimal frontend. That includes a test VFS and switchable frontend capabilities. A synthetic NES ROM is always tested. Environment variables add real content:
+
+| Variable | Effect |
+|---|---|
+| `JGENESIS_TEST_ROMS` | `;`-separated content paths to load, run, and save-state |
+| `JGENESIS_TEST_SYSTEM_DIR` | Firmware directory; also enables the no-content Sega CD BIOS tests |
+| `JGENESIS_TEST_FRAMES` | Frames to run each ROM for (default 600) |
+| `JGENESIS_TEST_PRESS_START` | Tap Start every few seconds, e.g. to get past the PC Engine System Card |
+| `JGENESIS_TEST_DUMP_DIR` | Write each ROM's last frame there as a PPM image |
+| `JGENESIS_TEST_SCD_MODE_1` | `<cartridge>;<disc>` to load through the Sega CD Mode 1 subsystem |
 
 ### CI
 
-- **GitHub Actions** (`.github/workflows/build.yml`) runs tests and builds every platform above.
-- **`.gitlab-ci.yml`** is laid out for libretro's buildbot templates. Those images only ship C toolchains, so it sets `RUST_BOOTSTRAP=1`, which makes `Makefile.libretro` install rustup before building.
+- **GitHub Actions** (`.github/workflows/build.yml`) runs the tests and builds every platform above
+- **`.gitlab-ci.yml`** is laid out for libretro's buildbot templates
 
 ### Unsupported platforms
 
@@ -78,10 +120,14 @@ PS2, PS3, GameCube, Wii, Wii U and Switch have no Rust target with a standard li
 
 jgenesis favors accuracy over speed. 32X, Sega CD, and SNES games with coprocessors need a reasonably fast CPU, and may not run at full speed on low-end Android devices or in the browser.
 
-### Background
+### Design
 
-The jgenesis backend crates are used unmodified, as git dependencies pinned to a specific revision. The libretro API is a small hand-written FFI layer (`src/ffi.rs`); there's no bindgen dependency, so it cross-compiles without libclang. Every emulator implements jgenesis's `EmulatorTrait`, so one generic `Session<E>` (`src/session.rs`) handles video, audio, input, saves and save states for all systems. The GPU post-processing that standalone jgenesis does in shaders (GBC/GBA LCD color correction and frame blending) is reimplemented on the CPU (`src/frontend.rs`).
+- **Upstream code:** the jgenesis backend crates are used unmodified, as git dependencies pinned to a specific revision.
+- **libretro API:** a small hand-written FFI layer (`src/ffi.rs`). There's no bindgen dependency, so the core cross-compiles without libclang.
+- **One session type for every system:** every emulator implements jgenesis's `EmulatorTrait`, so one generic `Session<E>` (`src/session.rs`) handles video, audio, input, saves, and save states for all of them.
+- **CPU post-processing:** standalone jgenesis does GBC/GBA LCD color correction and frame blending in GPU shaders. Here they're reimplemented on the CPU (`src/frontend.rs`).
+- **File access:** goes through `src/vfs.rs`, which uses the frontend's VFS and falls back to `std::fs`.
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). Same as the [jgenesis license](https://github.com/jsgroth/jgenesis/blob/master/LICENSE).
+[GPL-3.0-or-later](LICENSE), the same as [jgenesis](https://github.com/jsgroth/jgenesis/blob/master/LICENSE).

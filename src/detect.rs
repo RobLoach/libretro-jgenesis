@@ -5,8 +5,7 @@
 
 use cdrom::cdtime::CdTime;
 use cdrom::cue::TrackType;
-use cdrom::reader::{CdRom, CdRomFileFormat};
-use std::path::Path;
+use cdrom::reader::CdRom;
 
 /// Extensions loaded from a path on disk.
 pub const DISC_EXTENSIONS: &[&str] = &["cue", "chd", "m3u"];
@@ -28,14 +27,6 @@ pub enum Console {
     PcEngineCd,
 }
 
-/// Lowercase file extension of a content path. Handles `RetroArch`'s `archive.zip#file.ext` paths.
-#[must_use]
-pub fn extension(path: &str) -> Option<String> {
-    let file_name = path.rsplit(['/', '\\', '#']).next()?;
-    let (_, extension) = file_name.rsplit_once('.')?;
-    Some(extension.to_ascii_lowercase())
-}
-
 /// Detect the console for a cartridge ROM from its extension and header.
 #[must_use]
 pub fn detect_cartridge(extension: &str, rom: &[u8]) -> Option<Console> {
@@ -53,6 +44,20 @@ pub fn detect_cartridge(extension: &str, rom: &[u8]) -> Option<Console> {
         _ => return None,
     };
     Some(console)
+}
+
+/// Whether a `.bin` file is a CD image's data track rather than a cartridge ROM, e.g. track 1 of a
+/// zipped CUE/BIN image that the frontend extracted on its own.
+#[must_use]
+pub fn is_disc_data_track(rom: &[u8]) -> bool {
+    // Raw 2352-byte sectors start with this sync pattern, which can't begin a Genesis ROM (its
+    // reset vector would be $FFFFFFFF)
+    const SECTOR_SYNC: [u8; 12] =
+        [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00];
+
+    // 2048-byte sectors (ISO) have no sync pattern, but Sega CD discs start with an ID string
+    rom.starts_with(&SECTOR_SYNC)
+        || [b"SEGADISCSYSTEM" as &[u8], b"SEGADATADISC"].iter().any(|id| rom.starts_with(id))
 }
 
 // GBA cartridge headers contain the fixed value 0x96 at 0xB2 and the Nintendo logo at 0x04,
@@ -90,7 +95,7 @@ fn guess_genesis_console(header: &[u8]) -> Console {
 
 /// Detect whether a CD-ROM image is a Sega CD, Sega CD 32X, or PC Engine CD game.
 #[must_use]
-pub fn detect_disc(path: &Path) -> Console {
+pub fn detect_disc(disc: &mut CdRom) -> Console {
     const DEFAULT: Console = Console::SegaCd;
 
     fn sega_cd_with_32x_check(sector_buffer: &[u8; cdrom::BYTES_PER_SECTOR as usize]) -> Console {
@@ -100,9 +105,6 @@ pub fn detect_disc(path: &Path) -> Console {
             Console::SegaCd
         }
     }
-
-    let Some(disc_format) = CdRomFileFormat::from_file_path(path) else { return DEFAULT };
-    let Ok(mut disc) = CdRom::open(path, disc_format) else { return DEFAULT };
 
     let Some(first_data_track) =
         disc.cue().tracks_iter().find(|track| track.track_type == TrackType::Data)
@@ -145,10 +147,7 @@ pub fn detect_disc(path: &Path) -> Console {
         return Console::PcEngineCd;
     }
 
-    log::warn!(
-        "Unable to reliably guess console for CD-ROM image at '{}'; defaulting to Sega CD",
-        path.display()
-    );
+    log::warn!("Unable to reliably guess console for CD-ROM image; defaulting to Sega CD");
 
     sega_cd_with_32x_check(&first_sector)
 }
@@ -158,19 +157,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extension_handles_archive_paths() {
-        assert_eq!(extension("/roms/Sonic.MD").as_deref(), Some("md"));
-        assert_eq!(extension("/roms/pack.zip#Sonic (USA).gen").as_deref(), Some("gen"));
-        assert_eq!(extension(r"C:\roms\game.sfc").as_deref(), Some("sfc"));
-        assert_eq!(extension("/roms/no_extension"), None);
-    }
-
-    #[test]
     fn plain_genesis_header() {
         let mut rom = vec![0; 0x400];
         rom[0x190..0x193].copy_from_slice(b"J  ");
         assert_eq!(detect_cartridge("md", &rom), Some(Console::Genesis));
         assert_eq!(detect_cartridge("bin", &rom), Some(Console::Genesis));
+    }
+
+    #[test]
+    fn disc_data_tracks_are_not_cartridges() {
+        let mut raw = vec![0xFF; 2352];
+        raw[0] = 0x00;
+        raw[11] = 0x00;
+        raw[0x10..0x1E].copy_from_slice(b"SEGADISCSYSTEM");
+        assert!(is_disc_data_track(&raw));
+
+        let iso = b"SEGADISCSYSTEM  ".repeat(128);
+        assert!(is_disc_data_track(&iso));
+
+        // Genesis ROMs start with the 68000 stack pointer and reset vector
+        let mut rom = vec![0; 0x400];
+        rom[..8].copy_from_slice(&[0x00, 0xFF, 0xFF, 0xFE, 0x00, 0x00, 0x02, 0x00]);
+        assert!(!is_disc_data_track(&rom));
     }
 
     #[test]

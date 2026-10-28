@@ -1,6 +1,7 @@
 //! Implementations of the jgenesis frontend traits ([`Renderer`], [`AudioOutput`], [`SaveWriter`])
 //! that buffer output for the libretro callbacks.
 
+use crate::vfs;
 use bincode::{Decode, Encode};
 use jgenesis_common::frontend::{
     AudioOutput, Color, ColorCorrection, FrameSize, RenderFrameOptions, Renderer, SaveWriter,
@@ -8,9 +9,8 @@ use jgenesis_common::frontend::{
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fmt::{Display, Formatter};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::LazyLock;
-use std::{fs, io};
 
 /// Same bincode configuration as the standalone jgenesis frontend, so that serialized save files
 /// (e.g. RTC state) are interchangeable between the two.
@@ -26,11 +26,16 @@ pub fn bincode_config() -> impl bincode::config::Config {
 #[derive(Default)]
 pub struct VideoOutput {
     pub frame: Vec<u32>,
+    /// Size of the pixels in `frame`, which lags behind `size` while output is skipped
+    pub frame_size: Option<FrameSize>,
     pub size: Option<FrameSize>,
     pub pixel_aspect_ratio: Option<f64>,
     pub target_fps: f64,
     /// Set whenever the emulator renders a frame; cleared by the caller
     pub frame_rendered: bool,
+    /// Skip producing `frame` when the frontend will discard it. Frame blending history is still
+    /// kept so that the next shown frame is unaffected.
+    pub skip_output: bool,
     /// Previous frame before blending, for frame blending (which blends the current and previous
     /// emulator frames, not the current frame and the previous blended output)
     previous_raw_frame: Vec<u32>,
@@ -48,6 +53,28 @@ impl Renderer for VideoOutput {
         target_fps: f64,
         options: RenderFrameOptions,
     ) -> Result<(), Self::Err> {
+        self.convert_frame(frame_buffer, frame_size, options);
+
+        self.size = Some(frame_size);
+        self.pixel_aspect_ratio = options.pixel_aspect_ratio.map(f64::from);
+        self.target_fps = target_fps;
+        self.frame_rendered = true;
+
+        Ok(())
+    }
+}
+
+impl VideoOutput {
+    fn convert_frame(
+        &mut self,
+        frame_buffer: &[Color],
+        frame_size: FrameSize,
+        options: RenderFrameOptions,
+    ) {
+        if self.skip_output && !options.frame_blending {
+            return;
+        }
+
         let len = frame_size.len() as usize;
         let pixels = &frame_buffer[..len];
 
@@ -65,22 +92,19 @@ impl Renderer for VideoOutput {
         }
 
         if options.frame_blending {
-            self.frame.clear();
-            self.frame.extend_from_slice(&self.raw_frame);
-            if self.previous_raw_frame.len() == self.frame.len() {
-                blend_frames(&mut self.frame, &self.previous_raw_frame);
+            if !self.skip_output {
+                self.frame.clear();
+                self.frame.extend_from_slice(&self.raw_frame);
+                if self.previous_raw_frame.len() == self.frame.len() {
+                    blend_frames(&mut self.frame, &self.previous_raw_frame);
+                }
+                self.frame_size = Some(frame_size);
             }
             std::mem::swap(&mut self.raw_frame, &mut self.previous_raw_frame);
         } else {
             self.previous_raw_frame.clear();
+            self.frame_size = Some(frame_size);
         }
-
-        self.size = Some(frame_size);
-        self.pixel_aspect_ratio = options.pixel_aspect_ratio.map(f64::from);
-        self.target_fps = target_fps;
-        self.frame_rendered = true;
-
-        Ok(())
     }
 }
 
@@ -190,10 +214,14 @@ impl CorrectionLut {
     }
 }
 
-/// Interleaved signed 16-bit stereo samples.
+/// Interleaved stereo samples in [-1, 1].
 #[derive(Default)]
 pub struct AudioBuffer {
-    pub samples: Vec<i16>,
+    pub samples: Vec<f32>,
+    /// Conversion buffer for frontends without float audio
+    pub int16_samples: Vec<i16>,
+    /// Drop samples when the frontend will discard them
+    pub discard: bool,
 }
 
 impl AudioOutput for AudioBuffer {
@@ -201,9 +229,12 @@ impl AudioOutput for AudioBuffer {
 
     #[inline]
     fn push_sample(&mut self, sample_l: f64, sample_r: f64) -> Result<(), Self::Err> {
-        let convert = |sample: f64| (sample * f64::from(i16::MAX)).round() as i16;
-        self.samples.push(convert(sample_l.clamp(-1.0, 1.0)));
-        self.samples.push(convert(sample_r.clamp(-1.0, 1.0)));
+        if self.discard {
+            return Ok(());
+        }
+
+        self.samples.push(sample_l.clamp(-1.0, 1.0) as f32);
+        self.samples.push(sample_r.clamp(-1.0, 1.0) as f32);
         Ok(())
     }
 }
@@ -245,25 +276,19 @@ impl SaveFiles {
             return;
         }
 
-        if let Err(err) = fs::create_dir_all(&self.dir) {
+        if let Err(err) = vfs::create_dir_all(&self.dir) {
             log::error!("Unable to create save directory '{}': {err}", self.dir.display());
             return;
         }
 
         for (extension, bytes) in std::mem::take(&mut self.pending) {
             let path = self.path(&extension);
-            match write_atomic(&path, &bytes) {
+            match vfs::write_replace(&path, &path.with_extension("tmp"), &bytes) {
                 Ok(()) => log::info!("Wrote save file '{}'", path.display()),
                 Err(err) => log::error!("Unable to write save file '{}': {err}", path.display()),
             }
         }
     }
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp_path = path.with_extension("tmp");
-    fs::write(&tmp_path, bytes)?;
-    fs::rename(&tmp_path, path)
 }
 
 impl SaveWriter for SaveFiles {
@@ -275,7 +300,7 @@ impl SaveWriter for SaveFiles {
         }
 
         let path = self.path(extension);
-        fs::read(&path).map_err(|err| SaveError(format!("{}: {err}", path.display())))
+        vfs::read(&path).map_err(|err| SaveError(format!("{}: {err}", path.display())))
     }
 
     fn persist_bytes(&mut self, extension: &str, bytes: &[u8]) -> Result<(), Self::Err> {
@@ -325,5 +350,22 @@ mod tests {
         // Two black frames in a row must be pure black: an older white frame must not linger
         render(&mut video, Color::BLACK);
         assert_eq!(video.frame, [0]);
+    }
+
+    #[test]
+    fn skipped_frames_still_feed_frame_blending() {
+        let mut video = VideoOutput::default();
+        render(&mut video, Color::BLACK);
+
+        // A hidden white frame leaves the output alone...
+        video.skip_output = true;
+        render(&mut video, Color::rgb(255, 255, 255));
+        assert_eq!(video.frame, [0]);
+        assert!(video.frame_rendered);
+
+        // ...but the next shown frame still blends with it
+        video.skip_output = false;
+        render(&mut video, Color::BLACK);
+        assert_ne!(video.frame, [0]);
     }
 }
