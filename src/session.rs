@@ -45,6 +45,10 @@ pub trait System: EmulatorTrait + Sized {
     /// Initial maximum frame size; grown at runtime if the emulator renders a larger frame
     const MAX_FRAME_SIZE: (u32, u32);
 
+    /// Whether the console has a reset button. Without one, jgenesis's `soft_reset` does nothing,
+    /// so `retro_reset` power cycles instead.
+    const HAS_SOFT_RESET: bool = true;
+
     /// Apply core options on top of the base config built at load time
     fn apply_options(options: &Options, config: &mut Self::Config);
 
@@ -252,6 +256,10 @@ impl<E: System> Session<E> {
         }
     }
 
+    fn restore_audio_output_frequency(&mut self) {
+        self.emulator.update_audio_output_frequency(self.av_info.timing.sample_rate as u64);
+    }
+
     /// Save state header: magic, then the length-prefixed save state version string.
     /// The u32 payload length follows the header.
     fn state_header() -> Vec<u8> {
@@ -373,7 +381,13 @@ impl<E: System> CoreSession for Session<E> {
     }
 
     fn reset(&mut self) {
-        self.emulator.soft_reset();
+        if E::HAS_SOFT_RESET {
+            self.emulator.soft_reset();
+        } else {
+            self.emulator.hard_reset(&mut self.saves);
+            // Hard reset rebuilds the emulator at its default output rate
+            self.restore_audio_output_frequency();
+        }
     }
 
     fn av_info(&self) -> RetroSystemAvInfo {

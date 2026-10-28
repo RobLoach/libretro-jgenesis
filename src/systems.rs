@@ -346,6 +346,8 @@ impl System for GameBoyEmulator {
 
     const MAX_FRAME_SIZE: (u32, u32) = (160, 144);
 
+    const HAS_SOFT_RESET: bool = false;
+
     fn apply_options(options: &Options, config: &mut GameBoyEmulatorConfig) {
         config.force_dmg_mode = options.get("gb_model") == "dmg";
         config.force_cgb_mode = options.get("gb_model") == "cgb";
@@ -391,6 +393,8 @@ impl System for GameBoyAdvanceEmulator {
     ];
 
     const MAX_FRAME_SIZE: (u32, u32) = (240, 160);
+
+    const HAS_SOFT_RESET: bool = false;
 
     fn apply_options(options: &Options, config: &mut GbaEmulatorConfig) {
         config.skip_bios_animation = options.enabled("gba_skip_bios");
@@ -453,6 +457,8 @@ impl System for PcEngineEmulator {
     ];
 
     const MAX_FRAME_SIZE: (u32, u32) = (512, 242);
+
+    const HAS_SOFT_RESET: bool = false;
 
     fn apply_options(options: &Options, config: &mut PceEmulatorConfig) {
         config.region = match options.get("pce_region") {

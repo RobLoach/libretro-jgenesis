@@ -681,6 +681,26 @@ fn battery_nes_rom() -> Vec<u8> {
     rom
 }
 
+/// 32 KiB MBC1 cartridge with 8 KiB battery-backed RAM that increments the first byte of cartridge
+/// RAM once per boot, so the .sav file counts how many times the game started
+fn boot_counter_gb_rom() -> Vec<u8> {
+    let mut rom = vec![0_u8; 0x8000];
+    // Entry point: NOP; JP $0150
+    rom[0x100..0x104].copy_from_slice(&[0x00, 0xC3, 0x50, 0x01]);
+    // MBC1+RAM+BATTERY, 32 KiB ROM, 8 KiB RAM
+    rom[0x147..0x14A].copy_from_slice(&[0x03, 0x00, 0x02]);
+    rom[0x150..0x15F].copy_from_slice(&[
+        0x3E, 0x0A, // LD A, $0A
+        0xEA, 0x00, 0x00, // LD ($0000), A (enable cartridge RAM)
+        0xFA, 0x00, 0xA0, // LD A, ($A000)
+        0x3C, // INC A
+        0xEA, 0x00, 0xA0, // LD ($A000), A
+        0x18, 0xFE, // JR -2
+        0x00,
+    ]);
+    rom
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!("jgenesis-libretro-test-{name}-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
@@ -1015,5 +1035,28 @@ fn input_max_users_limits_polling() {
     assert_eq!(POLLED_PORTS.load(Ordering::SeqCst), 0b1);
 
     core.unload();
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn reset_power_cycles_systems_without_reset_button() {
+    let _lock = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    reset_counters();
+
+    let dir = temp_dir("gb-reset");
+    let rom_path = dir.join("counter.gb");
+    let rom = boot_counter_gb_rom();
+    fs::write(&rom_path, &rom).unwrap();
+    fs::write(dir.join("counter.sav"), vec![0_u8; 0x2000]).unwrap();
+
+    // The Game Boy has no reset button, so retro_reset has to restart the game
+    let core = Core::load(&dir, &dir);
+    assert!(core.load_game(&rom_path, Some(&rom)), "retro_load_game failed");
+    core.run(10);
+    core.reset();
+    core.run(10);
+    core.unload();
+    assert_eq!(fs::read(dir.join("counter.sav")).unwrap()[0], 2, "game did not restart");
+
     fs::remove_dir_all(&dir).ok();
 }
