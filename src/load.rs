@@ -278,6 +278,8 @@ pub fn open_disc(path: &Path) -> Result<CdRom, String> {
     };
 
     if format == CdRomFileFormat::Chd && vfs::is_available() {
+        let size = vfs::file_size(path).map_err(|err| open_err(&err))?;
+        check_free_memory(path, size)?;
         let chd = vfs::read(path).map_err(|err| open_err(&err))?;
         return CdRom::open_chd_in_memory(chd).map_err(|err| open_err(&err));
     }
@@ -297,6 +299,26 @@ pub fn open_disc(path: &Path) -> Result<CdRom, String> {
         }
         err => open_err(&err),
     })
+}
+
+/// Refuse to read a disc image into memory when the frontend reports too little free memory,
+/// rather than risk the OS killing the frontend (e.g. on low-memory Android devices).
+fn check_free_memory(path: &Path, size: u64) -> Result<(), String> {
+    const MIB: u64 = 1024 * 1024;
+
+    let Some(free) = env::free_memory() else { return Ok(()) };
+    // Free memory is a snapshot, so leave headroom for everything else
+    let budget = free / 4 * 3;
+    if size <= budget {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Not enough free memory to load disc image '{}' ({} MiB, {} MiB free)",
+        path.display(),
+        size.div_ceil(MIB),
+        free / MIB
+    ))
 }
 
 fn load_disc(

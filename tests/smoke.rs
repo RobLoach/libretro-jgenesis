@@ -177,6 +177,15 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             callback.batch = Some(audio_sample_batch_float);
             true
         }
+        // GET_MEMORY_STATUS
+        0x10056 => match FREE_MEMORY.load(Ordering::SeqCst) {
+            u64::MAX => false,
+            free => {
+                let status = unsafe { &mut *data.cast::<[u64; 2]>() };
+                *status = [free, free];
+                true
+            }
+        },
         // SET_SUPPORT_NO_GAME
         18 => {
             SUPPORTS_NO_GAME.store(unsafe { *data.cast::<bool>() }, Ordering::SeqCst);
@@ -270,6 +279,8 @@ static MAX_USERS: AtomicI32 = AtomicI32::new(-1);
 /// Zero means `GET_TARGET_SAMPLE_RATE` is unsupported
 static TARGET_SAMPLE_RATE: AtomicU32 = AtomicU32::new(0);
 static FLOAT_AUDIO: AtomicBool = AtomicBool::new(false);
+/// `u64::MAX` means `GET_MEMORY_STATUS` is unsupported
+static FREE_MEMORY: AtomicU64 = AtomicU64::new(u64::MAX);
 
 static FLOAT_AUDIO_FRAMES: AtomicUsize = AtomicUsize::new(0);
 /// Bitmask of ports the core has read input from
@@ -296,11 +307,18 @@ struct FrontendCaps {
     max_users: Option<u32>,
     target_sample_rate: Option<u32>,
     float_audio: bool,
+    free_memory: Option<u64>,
 }
 
 impl Default for FrontendCaps {
     fn default() -> Self {
-        Self { can_dupe: true, max_users: None, target_sample_rate: None, float_audio: false }
+        Self {
+            can_dupe: true,
+            max_users: None,
+            target_sample_rate: None,
+            float_audio: false,
+            free_memory: None,
+        }
     }
 }
 
@@ -318,6 +336,7 @@ impl FrontendCaps {
         MAX_USERS.store(self.max_users.map_or(-1, |users| users as i32), Ordering::SeqCst);
         TARGET_SAMPLE_RATE.store(self.target_sample_rate.unwrap_or(0), Ordering::SeqCst);
         FLOAT_AUDIO.store(self.float_audio, Ordering::SeqCst);
+        FREE_MEMORY.store(self.free_memory.unwrap_or(u64::MAX), Ordering::SeqCst);
     }
 }
 
@@ -1093,6 +1112,27 @@ fn state_from_another_sample_rate_plays_at_this_one() {
         (60_000..68_000).contains(&audio_frames),
         "unexpected audio frame count {audio_frames}"
     );
+
+    core.unload();
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn chd_too_large_for_free_memory_is_refused() {
+    let _lock = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    reset_counters();
+    let _vfs = VfsGuard::enable();
+    let _caps = FrontendCaps { free_memory: Some(1024 * 1024), ..FrontendCaps::default() }.apply();
+
+    // With a VFS, CHDs are read into memory; this one is bigger than the frontend has free
+    let dir = temp_dir("chd-memory");
+    let chd_path = dir.join("big.chd");
+    fs::write(&chd_path, vec![0_u8; 2 * 1024 * 1024]).unwrap();
+
+    let core = Core::load(&dir, &dir);
+    assert!(!core.load_game(&chd_path, None), "oversized CHD should not load");
+    let message = LAST_MESSAGE.lock().unwrap().clone();
+    assert!(message.contains("Not enough free memory"), "unexpected: {message}");
 
     core.unload();
     fs::remove_dir_all(&dir).ok();

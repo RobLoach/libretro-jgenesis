@@ -167,6 +167,12 @@ pub fn read(path: &Path) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Size of the file at `path`, in bytes.
+pub fn file_size(path: &Path) -> io::Result<u64> {
+    let Some(iface) = interface() else { return Ok(fs::metadata(path)?.len()) };
+    VfsFile::open(iface, path, ffi::RETRO_VFS_FILE_ACCESS_READ)?.size()
+}
+
 pub fn read_to_string(path: &Path) -> io::Result<String> {
     String::from_utf8(read(path)?).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
 }

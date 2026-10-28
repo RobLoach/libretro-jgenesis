@@ -65,7 +65,7 @@ See [#8](https://github.com/RobLoach/libretro-jgenesis/issues/8) for improvement
 
 - **File access:** goes through the frontend's virtual file system (VFS) when it has one
   - CUE/BIN discs are still read directly from disk, so they don't load from `smb://` / `nfs://` shares or other VFS-only locations yet ([#12](https://github.com/RobLoach/libretro-jgenesis/issues/12))
-  - With a VFS, CHD images are read fully into memory
+  - With a VFS, CHD images are read fully into memory, unless the frontend reports too little free memory
 - **Audio:** goes out at the frontend's output sample rate, as float samples when the frontend supports it
 - **Run-ahead:** frames the frontend won't show skip video and audio conversion
 - **Core options:** settings for each system have their own category

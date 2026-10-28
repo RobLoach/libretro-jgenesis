@@ -340,6 +340,16 @@ fn send_audio<T>(samples: &[T], mut send: impl FnMut(&[T]) -> usize) {
     }
 }
 
+/// Physical memory currently available to allocate, if the frontend says. Advisory only: it can
+/// change at any time, and may include reclaimable cache.
+pub fn free_memory() -> Option<u64> {
+    let mut status = ffi::RetroMemoryStatus { free: 0, total: 0 };
+    // SAFETY: GET_MEMORY_STATUS takes a retro_memory_status*
+    let ok =
+        unsafe { environment(ffi::RETRO_ENVIRONMENT_GET_MEMORY_STATUS, (&raw mut status).cast()) };
+    ok.then_some(status.free)
+}
+
 /// Number of ports the frontend currently has devices for, if it says.
 pub fn input_max_users() -> Option<usize> {
     let mut users: c_uint = 0;

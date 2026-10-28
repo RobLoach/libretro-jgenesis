@@ -62,6 +62,7 @@ pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2: c_uint = 67;
 pub const RETRO_ENVIRONMENT_GET_TARGET_SAMPLE_RATE: c_uint = 0x51 | RETRO_ENVIRONMENT_EXPERIMENTAL;
 pub const RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_FLOAT: c_uint =
     0x55 | RETRO_ENVIRONMENT_EXPERIMENTAL;
+pub const RETRO_ENVIRONMENT_GET_MEMORY_STATUS: c_uint = 0x56 | RETRO_ENVIRONMENT_EXPERIMENTAL;
 
 pub const RETRO_SERIALIZATION_QUIRK_CORE_VARIABLE_SIZE: u64 = 1 << 2;
 pub const RETRO_SERIALIZATION_QUIRK_FRONT_VARIABLE_SIZE: u64 = 1 << 3;
@@ -162,6 +163,12 @@ pub struct RetroGameInfoExt {
 #[repr(C)]
 pub struct RetroAudioSampleFloatCallback {
     pub batch: Option<RetroAudioSampleBatchFloatFn>,
+}
+
+#[repr(C)]
+pub struct RetroMemoryStatus {
+    pub free: u64,
+    pub total: u64,
 }
 
 #[repr(C)]
