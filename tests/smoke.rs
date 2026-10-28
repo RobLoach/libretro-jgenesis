@@ -1060,3 +1060,40 @@ fn reset_power_cycles_systems_without_reset_button() {
 
     fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn state_from_another_sample_rate_plays_at_this_one() {
+    let _lock = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    let dir = temp_dir("state-rate");
+    let rom_path = dir.join("loop.nes");
+    let rom = synthetic_nes_rom();
+    fs::write(&rom_path, &rom).unwrap();
+
+    // Save at 48 kHz...
+    let core = Core::load(&dir, &dir);
+    assert!(core.load_game(&rom_path, Some(&rom)), "retro_load_game failed");
+    core.run(10);
+    let state = core.serialize();
+    core.unload();
+
+    // ...then load on a frontend running at 32 kHz
+    reset_counters();
+    let _caps =
+        FrontendCaps { target_sample_rate: Some(32_000), ..FrontendCaps::default() }.apply();
+    let core = Core::load(&dir, &dir);
+    assert!(core.load_game(&rom_path, Some(&rom)), "retro_load_game failed");
+    assert!(core.unserialize(&state), "retro_unserialize failed");
+    AUDIO_FRAMES.store(0, Ordering::SeqCst);
+    core.run(120);
+
+    // ~533 stereo frames per video frame at 32 kHz / 60.1 Hz, not ~800 as at 48 kHz
+    let audio_frames = AUDIO_FRAMES.load(Ordering::SeqCst);
+    assert!(
+        (60_000..68_000).contains(&audio_frames),
+        "unexpected audio frame count {audio_frames}"
+    );
+
+    core.unload();
+    fs::remove_dir_all(&dir).ok();
+}

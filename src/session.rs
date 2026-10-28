@@ -451,6 +451,8 @@ impl<E: System> CoreSession for Session<E> {
 
         self.emulator.load_state(state);
         self.emulator.reload_config(&self.config);
+        // The state carries the output rate it was saved at, which may not be this frontend's
+        self.restore_audio_output_frequency();
 
         Ok(())
     }
