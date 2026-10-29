@@ -1137,3 +1137,24 @@ fn chd_too_large_for_free_memory_is_refused() {
     core.unload();
     fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn missing_chd_is_not_opened_through_vfs() {
+    let _lock = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    reset_counters();
+    let _vfs = VfsGuard::enable();
+    let _caps = FrontendCaps { free_memory: Some(1024 * 1024), ..FrontendCaps::default() }.apply();
+
+    let dir = temp_dir("chd-missing");
+    let core = Core::load(&dir, &dir);
+    assert!(!core.load_game(&dir.join("missing.chd"), None), "missing CHD should not load");
+
+    // The core checks that the file exists instead of making the frontend log an open failure
+    let paths = VFS_READ_PATHS.lock().unwrap().clone();
+    assert!(!paths.iter().any(|path| path.ends_with("missing.chd")), "opened: {paths:?}");
+    let message = LAST_MESSAGE.lock().unwrap().clone();
+    assert!(message.contains("not found"), "unexpected: {message}");
+
+    core.unload();
+    fs::remove_dir_all(&dir).ok();
+}

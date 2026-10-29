@@ -152,16 +152,19 @@ pub fn exists(path: &Path) -> bool {
     }
 }
 
-pub fn read(path: &Path) -> io::Result<Vec<u8>> {
-    let Some(iface) = interface() else { return fs::read(path) };
-
-    // Check first, so that a missing file (e.g. no save yet) doesn't make the frontend log an
-    // open failure
+/// Open an existing file for reading. Checks first, so that a missing file (e.g. no save yet)
+/// doesn't make the frontend log an open failure.
+fn open_existing(iface: &'static RetroVfsInterface, path: &Path) -> io::Result<VfsFile> {
     if !vfs_exists(iface, path)? {
         return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
     }
+    VfsFile::open(iface, path, ffi::RETRO_VFS_FILE_ACCESS_READ)
+}
 
-    let mut file = VfsFile::open(iface, path, ffi::RETRO_VFS_FILE_ACCESS_READ)?;
+pub fn read(path: &Path) -> io::Result<Vec<u8>> {
+    let Some(iface) = interface() else { return fs::read(path) };
+
+    let mut file = open_existing(iface, path)?;
     let mut bytes = Vec::with_capacity(file.size().unwrap_or(0).try_into().unwrap_or(0));
     file.read_to_end(&mut bytes)?;
     Ok(bytes)
@@ -170,7 +173,7 @@ pub fn read(path: &Path) -> io::Result<Vec<u8>> {
 /// Size of the file at `path`, in bytes.
 pub fn file_size(path: &Path) -> io::Result<u64> {
     let Some(iface) = interface() else { return Ok(fs::metadata(path)?.len()) };
-    VfsFile::open(iface, path, ffi::RETRO_VFS_FILE_ACCESS_READ)?.size()
+    open_existing(iface, path)?.size()
 }
 
 pub fn read_to_string(path: &Path) -> io::Result<String> {
