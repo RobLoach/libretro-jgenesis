@@ -22,10 +22,11 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::{ptr, slice};
 
 const LIBRARY_NAME: &CStr = c"jgenesis";
-const LIBRARY_VERSION: &CStr = c"0.14.1";
-const VALID_EXTENSIONS: &CStr =
-    c"sg|sms|gg|gen|md|bin|smd|32x|nes|sfc|smc|gb|gbc|gba|pce|cue|chd|m3u";
-const FULLPATH_EXTENSIONS: &CStr = c"cue|chd|m3u";
+const LIBRARY_VERSION: &CStr =
+    match CStr::from_bytes_with_nul(concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes()) {
+        Ok(version) => version,
+        Err(_) => panic!("package version contains a NUL byte"),
+    };
 
 struct Game {
     loaded: LoadedGame,
@@ -90,7 +91,7 @@ pub unsafe extern "C" fn retro_get_system_info(info: *mut RetroSystemInfo) {
         *info = RetroSystemInfo {
             library_name: LIBRARY_NAME.as_ptr(),
             library_version: LIBRARY_VERSION.as_ptr(),
-            valid_extensions: VALID_EXTENSIONS.as_ptr(),
+            valid_extensions: detect::VALID_EXTENSIONS.as_ptr(),
             need_fullpath: false,
             block_extract: false,
         };
@@ -139,7 +140,7 @@ pub unsafe extern "C" fn retro_set_environment(cb: Option<ffi::RetroEnvironmentF
 
         let overrides = [
             RetroSystemContentInfoOverride {
-                extensions: FULLPATH_EXTENSIONS.as_ptr(),
+                extensions: detect::DISC_EXTENSIONS.as_ptr(),
                 need_fullpath: true,
                 persistent_data: false,
             },
@@ -279,6 +280,22 @@ unsafe fn game_path_and_data(game: &RetroGameInfo) -> (Option<String>, Option<&[
     (path, data)
 }
 
+/// Like [`guard`], but a panic also unloads the game: the emulator's state can't be trusted after
+/// one, so stop running it.
+fn guard_game<T>(name: &str, default: T, f: impl FnOnce() -> T) -> T {
+    let mut panicked = true;
+    let result = guard(name, default, || {
+        let result = f();
+        panicked = false;
+        result
+    });
+    if panicked {
+        guard("unloading crashed game", (), || core().game = None);
+        env::show_message("jgenesis: the emulator crashed; see the log for details", 600);
+    }
+    result
+}
+
 /// Shared by `retro_load_game` and `retro_load_game_special`.
 fn start_game(name: &str, load: impl FnOnce() -> Result<LoadedGame, String>) -> bool {
     guard(name, false, || {
@@ -371,12 +388,12 @@ pub extern "C" fn retro_unload_game() {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn retro_run() {
-    let ok = guard("retro_run", false, || {
+    guard_game("retro_run", (), || {
         let mut core = core();
         let Some(game) = &mut core.game else {
             env::input_poll();
             env::video_refresh(None, 0, 0);
-            return true;
+            return;
         };
 
         if env::variables_updated() {
@@ -390,19 +407,12 @@ pub extern "C" fn retro_run() {
         let av_info = game.loaded.session.av_info();
         drop(core);
         set_av_info(Some(av_info));
-        true
     });
-
-    if !ok {
-        // The emulator panicked; its state can't be trusted, so stop running it
-        core().game = None;
-        env::show_message("jgenesis: the emulator crashed; see the log for details", 600);
-    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn retro_reset() {
-    guard("retro_reset", (), || {
+    guard_game("retro_reset", (), || {
         if let Some(game) = &mut core().game {
             game.loaded.session.reset();
         }
@@ -436,7 +446,7 @@ pub unsafe extern "C" fn retro_serialize(data: *mut c_void, size: usize) -> bool
 
     // SAFETY: Frontend provides a writable buffer of `size` bytes
     let out = unsafe { slice::from_raw_parts_mut(data.cast::<u8>(), size) };
-    guard("retro_serialize", false, || {
+    guard_game("retro_serialize", false, || {
         core().game.as_mut().is_some_and(|game| game.loaded.session.serialize(out))
     })
 }
@@ -452,7 +462,7 @@ pub unsafe extern "C" fn retro_unserialize(data: *const c_void, size: usize) -> 
 
     // SAFETY: Frontend provides a readable buffer of `size` bytes
     let data = unsafe { slice::from_raw_parts(data.cast::<u8>(), size) };
-    guard("retro_unserialize", false, || {
+    guard_game("retro_unserialize", false, || {
         let mut core = core();
         let Some(game) = &mut core.game else { return false };
         match game.loaded.session.unserialize(data) {
@@ -512,7 +522,7 @@ fn register_disk_control() {
 }
 
 fn with_game<T: Copy>(name: &str, default: T, f: impl FnOnce(&mut Game) -> T) -> T {
-    guard(name, default, || core().game.as_mut().map_or(default, f))
+    guard_game(name, default, || core().game.as_mut().map_or(default, f))
 }
 
 extern "C" fn disk_set_eject_state(ejected: bool) -> bool {
@@ -609,4 +619,29 @@ extern "C" fn disk_add_image_index() -> bool {
         game.loaded.discs.push(PathBuf::new());
         true
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info_value(key: &str) -> &'static str {
+        include_str!("../jgenesis_libretro.info")
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix(key)?
+                    .trim()
+                    .strip_prefix('=')?
+                    .trim()
+                    .strip_prefix('"')?
+                    .strip_suffix('"')
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn info_file_matches_core() {
+        assert_eq!(info_value("supported_extensions"), detect::VALID_EXTENSIONS.to_str().unwrap());
+        assert_eq!(info_value("display_version"), LIBRARY_VERSION.to_str().unwrap());
+    }
 }

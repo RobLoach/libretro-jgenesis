@@ -30,7 +30,6 @@ pub struct VideoOutput {
     pub frame_size: Option<FrameSize>,
     pub size: Option<FrameSize>,
     pub pixel_aspect_ratio: Option<f64>,
-    pub target_fps: f64,
     /// Set whenever the emulator renders a frame; cleared by the caller
     pub frame_rendered: bool,
     /// Skip producing `frame` when the frontend will discard it. Frame blending history is still
@@ -50,14 +49,13 @@ impl Renderer for VideoOutput {
         &mut self,
         frame_buffer: &[Color],
         frame_size: FrameSize,
-        target_fps: f64,
+        _target_fps: f64,
         options: RenderFrameOptions,
     ) -> Result<(), Self::Err> {
         self.convert_frame(frame_buffer, frame_size, options);
 
         self.size = Some(frame_size);
         self.pixel_aspect_ratio = options.pixel_aspect_ratio.map(f64::from);
-        self.target_fps = target_fps;
         self.frame_rendered = true;
 
         Ok(())
@@ -256,15 +254,27 @@ pub struct SaveFiles {
     dir: PathBuf,
     base_name: String,
     pending: HashMap<String, Vec<u8>>,
+    /// Contents of each save file as last read or written, to skip rewriting unchanged saves
+    on_disk: HashMap<String, Vec<u8>>,
 }
 
 impl SaveFiles {
     pub fn new(dir: PathBuf, base_name: String) -> Self {
-        Self { dir, base_name, pending: HashMap::new() }
+        Self { dir, base_name, pending: HashMap::new(), on_disk: HashMap::new() }
     }
 
     fn path(&self, extension: &str) -> PathBuf {
         self.dir.join(format!("{}.{extension}", self.base_name))
+    }
+
+    /// Queue a write, unless the file already holds these bytes. Emulators persist save RAM
+    /// whenever it's written, even if no value changed.
+    fn queue(&mut self, extension: &str, bytes: &[u8]) {
+        if self.on_disk.get(extension).is_some_and(|on_disk| on_disk == bytes) {
+            self.pending.remove(extension);
+        } else {
+            self.pending.insert(extension.into(), bytes.to_vec());
+        }
     }
 
     pub fn has_pending_writes(&self) -> bool {
@@ -284,7 +294,10 @@ impl SaveFiles {
         for (extension, bytes) in std::mem::take(&mut self.pending) {
             let path = self.path(&extension);
             match vfs::write_replace(&path, &path.with_extension("tmp"), &bytes) {
-                Ok(()) => log::info!("Wrote save file '{}'", path.display()),
+                Ok(()) => {
+                    log::info!("Wrote save file '{}'", path.display());
+                    self.on_disk.insert(extension, bytes);
+                }
                 Err(err) => log::error!("Unable to write save file '{}': {err}", path.display()),
             }
         }
@@ -300,11 +313,14 @@ impl SaveWriter for SaveFiles {
         }
 
         let path = self.path(extension);
-        vfs::read(&path).map_err(|err| SaveError(format!("{}: {err}", path.display())))
+        let bytes =
+            vfs::read(&path).map_err(|err| SaveError(format!("{}: {err}", path.display())))?;
+        self.on_disk.insert(extension.into(), bytes.clone());
+        Ok(bytes)
     }
 
     fn persist_bytes(&mut self, extension: &str, bytes: &[u8]) -> Result<(), Self::Err> {
-        self.pending.insert(extension.into(), bytes.to_vec());
+        self.queue(extension, bytes);
         Ok(())
     }
 
@@ -318,7 +334,7 @@ impl SaveWriter for SaveFiles {
     fn persist_serialized<E: Encode>(&mut self, extension: &str, data: E) -> Result<(), Self::Err> {
         let bytes = bincode::encode_to_vec(data, bincode_config())
             .map_err(|err| SaveError(format!("Error encoding .{extension} save: {err}")))?;
-        self.pending.insert(extension.into(), bytes);
+        self.queue(extension, &bytes);
         Ok(())
     }
 }

@@ -176,7 +176,7 @@ pub fn load_game(path: Option<&str>, data: Option<&[u8]>) -> Result<LoadedGame, 
         return Ok(game);
     }
 
-    if detect::DISC_EXTENSIONS.contains(&extension) {
+    if detect::is_disc_extension(extension) {
         return load_disc(content.require_path()?, &dirs, saves, &options);
     }
 

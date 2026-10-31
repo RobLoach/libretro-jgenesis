@@ -97,6 +97,7 @@ pub struct Session<E: System> {
     frames_since_save_write: Option<u32>,
     av_info: RetroSystemAvInfo,
     state_size: usize,
+    state_header: Vec<u8>,
 }
 
 impl<E: System> Session<E> {
@@ -152,6 +153,7 @@ impl<E: System> Session<E> {
             frames_since_save_write: None,
             av_info,
             state_size: 0,
+            state_header: Self::state_header(),
         })
     }
 
@@ -245,6 +247,7 @@ impl<E: System> Session<E> {
 
     fn update_saves(&mut self) {
         if !self.saves.has_pending_writes() {
+            self.frames_since_save_write = None;
             return;
         }
 
@@ -274,7 +277,7 @@ impl<E: System> Session<E> {
     /// Encode the current state directly into `out`, returning the number of bytes written, or
     /// None if `out` is too small.
     fn encode_state_into(&self, out: &mut [u8]) -> Result<Option<usize>, String> {
-        let header = Self::state_header();
+        let header = &self.state_header;
         let payload_offset = header.len() + 4;
         if out.len() < payload_offset {
             return Ok(None);
@@ -290,7 +293,7 @@ impl<E: System> Session<E> {
             Err(err) => return Err(format!("Error encoding save state: {err}")),
         };
 
-        out[..header.len()].copy_from_slice(&header);
+        out[..header.len()].copy_from_slice(header);
         out[header.len()..payload_offset].copy_from_slice(&(payload_len as u32).to_le_bytes());
 
         Ok(Some(payload_offset + payload_len))
@@ -306,7 +309,7 @@ impl<E: System> Session<E> {
         )
         .map_err(|err| format!("Error encoding save state: {err}"))?;
 
-        Ok(Self::state_header().len() + 4 + writer.bytes_written)
+        Ok(self.state_header.len() + 4 + writer.bytes_written)
     }
 
     /// Reported state size: leave headroom because the encoded size can vary slightly (e.g.

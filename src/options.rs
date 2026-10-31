@@ -539,7 +539,9 @@ pub fn register() {
     }
 }
 
-/// Current values of all core options.
+const KEY_PREFIX: &str = "jgenesis_";
+
+/// Current values of all core options, keyed without the `jgenesis_` prefix.
 pub struct Options {
     values: HashMap<&'static str, String>,
 }
@@ -550,6 +552,7 @@ impl Options {
             .iter()
             .map(|option| {
                 let key = option.key.to_str().unwrap();
+                let key = key.strip_prefix(KEY_PREFIX).unwrap_or(key);
                 let value = env::get_variable(option.key)
                     .filter(|value| option.values.iter().any(|(v, _)| v.to_str() == Ok(value)))
                     .unwrap_or_else(|| option.values[0].0.to_str().unwrap().into());
@@ -561,8 +564,7 @@ impl Options {
 
     /// Value of an option, without the `jgenesis_` prefix.
     pub fn get(&self, key: &str) -> &str {
-        let full_key = format!("jgenesis_{key}");
-        self.values.get(full_key.as_str()).map_or("", String::as_str)
+        self.values.get(key).map_or("", String::as_str)
     }
 
     pub fn enabled(&self, key: &str) -> bool {

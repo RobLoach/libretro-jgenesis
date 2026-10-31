@@ -6,9 +6,23 @@
 use cdrom::cdtime::CdTime;
 use cdrom::cue::TrackType;
 use cdrom::reader::CdRom;
+use std::ffi::CStr;
+
+/// Every supported extension, as reported to the frontend. Must match `jgenesis_libretro.info`.
+pub const VALID_EXTENSIONS: &CStr =
+    c"sg|sms|gg|gen|md|bin|smd|32x|nes|sfc|smc|gb|gbc|gba|pce|cue|chd|m3u";
 
 /// Extensions loaded from a path on disk.
-pub const DISC_EXTENSIONS: &[&str] = &["cue", "chd", "m3u"];
+pub const DISC_EXTENSIONS: &CStr = c"cue|chd|m3u";
+
+fn extensions(list: &'static CStr) -> impl Iterator<Item = &'static str> {
+    list.to_str().unwrap_or_default().split('|')
+}
+
+#[must_use]
+pub fn is_disc_extension(extension: &str) -> bool {
+    extensions(DISC_EXTENSIONS).any(|disc| disc == extension)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Console {
@@ -155,6 +169,16 @@ pub fn detect_disc(disc: &mut CdRom) -> Console {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_valid_extension_is_handled() {
+        for extension in extensions(VALID_EXTENSIONS) {
+            assert!(
+                is_disc_extension(extension) || detect_cartridge(extension, &[]).is_some(),
+                "{extension}"
+            );
+        }
+    }
 
     #[test]
     fn plain_genesis_header() {
