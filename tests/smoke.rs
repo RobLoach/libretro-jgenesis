@@ -720,6 +720,24 @@ fn boot_counter_gb_rom() -> Vec<u8> {
     rom
 }
 
+/// 32 KiB Game Boy cartridge that optionally powers off the APU (NR52 = 0), then spins forever
+fn idle_gb_rom(apu_off: bool) -> Vec<u8> {
+    let mut rom = vec![0_u8; 0x8000];
+    // Entry point: NOP; JP $0150
+    rom[0x100..0x104].copy_from_slice(&[0x00, 0xC3, 0x50, 0x01]);
+    let program: &[u8] = if apu_off {
+        &[
+            0xAF, // XOR A
+            0xE0, 0x26, // LDH ($26), A (APU off)
+            0x18, 0xFE, // JR -2
+        ]
+    } else {
+        &[0x18, 0xFE] // JR -2
+    };
+    rom[0x150..0x150 + program.len()].copy_from_slice(program);
+    rom
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!("jgenesis-libretro-test-{name}-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
@@ -1152,4 +1170,32 @@ fn missing_chd_is_not_opened_through_vfs() {
 
     core.unload();
     fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn game_boy_audio_keeps_pace_with_apu_off() {
+    let _lock = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    for apu_off in [false, true] {
+        reset_counters();
+        let dir = temp_dir(&format!("gb-apu-off-{apu_off}"));
+        let rom_path = dir.join("idle.gb");
+        let rom = idle_gb_rom(apu_off);
+        fs::write(&rom_path, &rom).unwrap();
+
+        let core = Core::load(&dir, &dir);
+        assert!(core.load_game(&rom_path, Some(&rom)), "retro_load_game failed");
+        let frames = 600;
+        core.run(frames);
+        let av_info = core.av_info();
+        core.unload();
+        fs::remove_dir_all(&dir).ok();
+
+        let expected = frames as f64 * av_info.sample_rate / av_info.fps;
+        let audio_frames = AUDIO_FRAMES.load(Ordering::SeqCst) as f64;
+        assert!(
+            (audio_frames / expected - 1.0).abs() < 0.01,
+            "APU off: {apu_off}: {audio_frames} audio frames, expected ~{expected:.0}"
+        );
+    }
 }
