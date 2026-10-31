@@ -158,15 +158,6 @@ pub unsafe extern "C" fn retro_set_environment(cb: Option<ffi::RetroEnvironmentF
             );
         }
 
-        let mut support_no_game = true;
-        // SAFETY: SET_SUPPORT_NO_GAME takes a const bool*
-        unsafe {
-            env::environment(
-                ffi::RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME,
-                (&raw mut support_no_game).cast(),
-            );
-        }
-
         register_subsystems();
         options::register();
     });
@@ -326,9 +317,7 @@ fn start_game(name: &str, load: impl FnOnce() -> Result<LoadedGame, String>) -> 
         }
 
         set_av_info(Some(loaded.session.av_info()));
-        // With no disc to start with (running the Sega CD BIOS), the drive starts open
-        let disc_ejected = loaded.discs.is_empty();
-        core().game = Some(Game { loaded, disc_index: 0, disc_ejected });
+        core().game = Some(Game { loaded, disc_index: 0, disc_ejected: false });
         env::negotiate_float_audio();
 
         true
@@ -341,7 +330,8 @@ fn start_game(name: &str, load: impl FnOnce() -> Result<LoadedGame, String>) -> 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn retro_load_game(game: *const RetroGameInfo) -> bool {
     if game.is_null() {
-        return start_game("retro_load_game", load::load_no_game);
+        log::error!("Content is required");
+        return false;
     }
 
     // SAFETY: Checked non-null above; frontend guarantees validity for the duration of this call

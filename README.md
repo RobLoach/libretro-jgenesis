@@ -101,7 +101,7 @@ The smoke tests (`tests/smoke.rs`) load the built core and drive it like a minim
 | Variable | Effect |
 |---|---|
 | `JGENESIS_TEST_ROMS` | `;`-separated content paths to load, run, and save-state |
-| `JGENESIS_TEST_SYSTEM_DIR` | Firmware directory; also enables the no-content Sega CD BIOS tests |
+| `JGENESIS_TEST_SYSTEM_DIR` | Firmware directory; also enables the BIOS tests |
 | `JGENESIS_TEST_FRAMES` | Frames to run each ROM for (default 600) |
 | `JGENESIS_TEST_PRESS_START` | Tap Start every few seconds, e.g. to get past the PC Engine System Card |
 | `JGENESIS_TEST_DUMP_DIR` | Write each ROM's last frame there as a PPM image |
