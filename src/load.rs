@@ -189,24 +189,6 @@ pub fn load_game(path: Option<&str>, data: Option<&[u8]>) -> Result<LoadedGame, 
     Ok(LoadedGame { session, console, discs: vec![] })
 }
 
-/// Boot the Sega CD BIOS with an empty disc drive, for running without content. A disc can be
-/// inserted later through the disk control interface.
-pub fn load_no_game() -> Result<LoadedGame, String> {
-    let options = Options::read();
-    let region = systems::genesis_region(&options).unwrap_or(GenesisRegion::Americas);
-    let bios_name = sega_cd_bios_name(region);
-
-    // Standalone jgenesis names BIOS-only saves (backup RAM) after the BIOS file
-    let save_name = bios_name.rsplit_once('.').map_or(bios_name, |(stem, _)| stem);
-    let (dirs, saves) = dirs_and_saves(Path::new(""), save_name);
-    let bios = dirs.read_firmware(bios_name)?;
-    log::info!("No content; booting Sega CD BIOS '{bios_name}'");
-
-    let session =
-        genesis_session(GenesisHardware::SegaCd, None, Some(bios), None, saves, &options)?;
-    Ok(LoadedGame { session, console: Console::SegaCd, discs: vec![] })
-}
-
 /// Sega CD "Mode 1": boot a Genesis or 32X cartridge with the Sega CD attached and a disc
 /// inserted, e.g. for MSU-MD games that play CD audio.
 pub fn load_sega_cd_mode_1(

@@ -738,7 +738,7 @@ fn synthetic_nes_rom_runs_and_round_trips_state() {
 
     let core = Core::load(&dir, &dir);
     assert!(REGISTERED_OPTIONS.load(Ordering::SeqCst) > 0, "core options were not registered");
-    assert!(SUPPORTS_NO_GAME.load(Ordering::SeqCst), "no-game support was not declared");
+    assert!(!SUPPORTS_NO_GAME.load(Ordering::SeqCst), "no-game support must not be declared");
     assert_eq!(REGISTERED_SUBSYSTEMS.load(Ordering::SeqCst), 1);
     assert_eq!(SERIALIZATION_QUIRKS.load(Ordering::SeqCst), 1 << 2, "expected CORE_VARIABLE_SIZE");
     assert!(core.load_game(&rom_path, Some(&rom)), "retro_load_game failed");
@@ -841,25 +841,16 @@ fn real_roms_render_frames() {
 }
 
 #[test]
-fn no_game_boots_sega_cd_bios() {
+fn loading_without_content_is_refused() {
     let _lock = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-
-    let Ok(system_dir) = env::var("JGENESIS_TEST_SYSTEM_DIR") else {
-        eprintln!("JGENESIS_TEST_SYSTEM_DIR not set; skipping");
-        return;
-    };
     reset_counters();
-    let save_dir = temp_dir("no-game");
+    let dir = temp_dir("no-game");
 
-    let core = Core::load(Path::new(&system_dir), &save_dir);
-    assert!(core.load_no_game(), "retro_load_game(NULL) failed");
-
-    // The BIOS logo animation takes a few seconds to appear
-    core.run(600);
-    assert!(NON_BLACK_PIXELS.load(Ordering::SeqCst) > 0, "Sega CD BIOS screen was entirely black");
+    let core = Core::load(&dir, &dir);
+    assert!(!core.load_no_game(), "retro_load_game(NULL) should fail");
 
     core.unload();
-    fs::remove_dir_all(&save_dir).ok();
+    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -961,17 +952,21 @@ fn vfs_only_firmware() {
     let _vfs = VfsGuard::enable();
     let save_dir = temp_dir("vfs-firmware");
 
+    // A cartridge that supports Sega CD hardware boots with the Sega CD BIOS
+    let rom_path = save_dir.join("sega-cd-cart.md");
+    let mut rom = vec![0_u8; 0x400];
+    rom[0x190..0x193].copy_from_slice(b"JC ");
+    fs::write(&rom_path, &rom).unwrap();
+
     // Firmware is only reachable through the VFS
     let core = Core::load(Path::new(&format!("{VFS_ONLY}{system_dir}")), &save_dir);
-    assert!(core.load_no_game(), "retro_load_game(NULL) failed");
+    assert!(core.load_game(&rom_path, Some(&rom)), "retro_load_game failed");
     let paths = VFS_READ_PATHS.lock().unwrap().clone();
     assert!(
         paths.iter().any(|path| path.ends_with("bios_CD_U.bin")),
         "BIOS not read via VFS: {paths:?}"
     );
-
-    core.run(600);
-    assert!(NON_BLACK_PIXELS.load(Ordering::SeqCst) > 0, "Sega CD BIOS screen was entirely black");
+    core.run(5);
 
     core.unload();
     fs::remove_dir_all(&save_dir).ok();
