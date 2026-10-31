@@ -49,6 +49,10 @@ pub trait System: EmulatorTrait + Sized {
     /// so `retro_reset` power cycles instead.
     const HAS_SOFT_RESET: bool = true;
 
+    /// Pad each frame's audio with silence when it comes up short. The Game Boy APU produces
+    /// samples at half rate while it is powered off, so frames would otherwise be missing audio.
+    const PAD_SHORT_AUDIO: bool = false;
+
     /// Apply core options on top of the base config built at load time
     fn apply_options(options: &Options, config: &mut Self::Config);
 
@@ -259,6 +263,15 @@ impl<E: System> Session<E> {
         }
     }
 
+    /// Pad the frame's audio with silence up to a frame's worth, if it's more than 2% short.
+    fn pad_short_audio(&mut self) {
+        let expected = self.av_info.timing.sample_rate / self.av_info.timing.fps;
+        let produced = (self.audio.samples.len() / 2) as f64;
+        if produced < expected * 0.98 {
+            self.audio.samples.resize(2 * expected as usize, 0.0);
+        }
+    }
+
     fn restore_audio_output_frequency(&mut self) {
         self.emulator.update_audio_output_frequency(self.av_info.timing.sample_rate as u64);
     }
@@ -376,6 +389,9 @@ impl<E: System> CoreSession for Session<E> {
             ),
         }
 
+        if E::PAD_SHORT_AUDIO && self.video.frame_rendered && !self.audio.discard {
+            self.pad_short_audio();
+        }
         env::audio_sample_batch(&self.audio.samples, &mut self.audio.int16_samples);
 
         self.update_saves();

@@ -348,6 +348,8 @@ impl System for GameBoyEmulator {
 
     const HAS_SOFT_RESET: bool = false;
 
+    const PAD_SHORT_AUDIO: bool = true;
+
     fn apply_options(options: &Options, config: &mut GameBoyEmulatorConfig) {
         config.force_dmg_mode = options.get("gb_model") == "dmg";
         config.force_cgb_mode = options.get("gb_model") == "cgb";
