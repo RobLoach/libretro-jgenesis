@@ -245,12 +245,49 @@ pub fn set_system_av_info(av_info: &RetroSystemAvInfo) {
     }
 }
 
-pub fn show_message(msg: &str, frames: c_uint) {
+/// Show a message on screen for `duration_ms`. Uses `SET_MESSAGE_EXT` when available, so that
+/// frontends can style it by `level`.
+pub fn show_message(msg: &str, level: log::Level, duration_ms: c_uint) {
     let Ok(msg) = CString::new(msg) else { return };
-    let mut message = ffi::RetroMessage { msg: msg.as_ptr(), frames };
+
+    let mut version: c_uint = 0;
+    // SAFETY: GET_MESSAGE_INTERFACE_VERSION takes an unsigned*
+    let ok = unsafe {
+        environment(ffi::RETRO_ENVIRONMENT_GET_MESSAGE_INTERFACE_VERSION, (&raw mut version).cast())
+    };
+    if ok && version >= 1 {
+        let mut message = ffi::RetroMessageExt {
+            msg: msg.as_ptr(),
+            duration: duration_ms,
+            priority: 1,
+            level: retro_log_level(level),
+            target: ffi::RETRO_MESSAGE_TARGET_ALL,
+            type_: ffi::RETRO_MESSAGE_TYPE_NOTIFICATION,
+            progress: -1,
+        };
+        // SAFETY: SET_MESSAGE_EXT takes a const retro_message_ext*
+        let shown = unsafe {
+            environment(ffi::RETRO_ENVIRONMENT_SET_MESSAGE_EXT, (&raw mut message).cast())
+        };
+        if shown {
+            return;
+        }
+    }
+
+    // ~60 frames per second
+    let mut message = ffi::RetroMessage { msg: msg.as_ptr(), frames: duration_ms * 60 / 1000 };
     // SAFETY: SET_MESSAGE takes a const retro_message*
     unsafe {
         environment(ffi::RETRO_ENVIRONMENT_SET_MESSAGE, (&raw mut message).cast());
+    }
+}
+
+fn retro_log_level(level: log::Level) -> c_int {
+    match level {
+        log::Level::Error => ffi::RETRO_LOG_ERROR,
+        log::Level::Warn => ffi::RETRO_LOG_WARN,
+        log::Level::Info => ffi::RETRO_LOG_INFO,
+        log::Level::Debug | log::Level::Trace => ffi::RETRO_LOG_DEBUG,
     }
 }
 
@@ -416,12 +453,7 @@ impl log::Log for Logger {
             return;
         };
 
-        let level = match record.level() {
-            log::Level::Error => ffi::RETRO_LOG_ERROR,
-            log::Level::Warn => ffi::RETRO_LOG_WARN,
-            log::Level::Info => ffi::RETRO_LOG_INFO,
-            log::Level::Debug | log::Level::Trace => ffi::RETRO_LOG_DEBUG,
-        };
+        let level = retro_log_level(record.level());
 
         let Ok(message) = CString::new(message.replace('\0', "")) else { return };
         // SAFETY: Format string is "%s" with exactly one NUL-terminated string argument
