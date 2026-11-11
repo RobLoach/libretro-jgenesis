@@ -282,7 +282,11 @@ fn guard_game<T>(name: &str, default: T, f: impl FnOnce() -> T) -> T {
     });
     if panicked {
         guard("unloading crashed game", (), || core().game = None);
-        env::show_message("jgenesis: the emulator crashed; see the log for details", 600);
+        env::show_message(
+            "jgenesis: the emulator crashed; see the log for details",
+            log::Level::Error,
+            10_000,
+        );
     }
     result
 }
@@ -307,7 +311,7 @@ fn start_game(name: &str, load: impl FnOnce() -> Result<LoadedGame, String>) -> 
             Ok(loaded) => loaded,
             Err(err) => {
                 log::error!("{err}");
-                env::show_message(&err, 300);
+                env::show_message(&err, log::Level::Error, 5_000);
                 return false;
             }
         };
@@ -459,7 +463,7 @@ pub unsafe extern "C" fn retro_unserialize(data: *const c_void, size: usize) -> 
             Ok(()) => true,
             Err(err) => {
                 log::error!("{err}");
-                env::show_message(&err, 300);
+                env::show_message(&err, log::Level::Error, 5_000);
                 false
             }
         }

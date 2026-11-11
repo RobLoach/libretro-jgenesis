@@ -90,6 +90,17 @@ struct VfsInterfaceInfo {
     iface: *const VfsInterface,
 }
 
+#[repr(C)]
+struct MessageExt {
+    msg: *const c_char,
+    duration: c_uint,
+    priority: c_uint,
+    level: i32,
+    target: i32,
+    type_: i32,
+    progress: i8,
+}
+
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 static FRAMES: AtomicUsize = AtomicUsize::new(0);
@@ -106,6 +117,10 @@ static REGISTERED_SUBSYSTEMS: AtomicUsize = AtomicUsize::new(0);
 static AV_ENABLE: AtomicI32 = AtomicI32::new(0b11);
 static DIRS: Mutex<Option<(CString, CString)>> = Mutex::new(None);
 static LAST_MESSAGE: Mutex<String> = Mutex::new(String::new());
+/// Reported by `GET_MESSAGE_INTERFACE_VERSION`; 0 makes the core fall back to `SET_MESSAGE`
+static MESSAGE_INTERFACE_VERSION: AtomicU32 = AtomicU32::new(0);
+/// `retro_log_level` of the last `SET_MESSAGE_EXT` message
+static LAST_MESSAGE_LEVEL: AtomicI32 = AtomicI32::new(-1);
 static LAST_FRAME: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
 unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
@@ -233,6 +248,22 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
         6 => {
             let msg = unsafe { CStr::from_ptr(*data.cast::<*const c_char>()) };
             *LAST_MESSAGE.lock().unwrap() = msg.to_string_lossy().into_owned();
+            true
+        }
+        // GET_MESSAGE_INTERFACE_VERSION
+        59 => match MESSAGE_INTERFACE_VERSION.load(Ordering::SeqCst) {
+            0 => false,
+            version => {
+                unsafe { *data.cast::<c_uint>() = version };
+                true
+            }
+        },
+        // SET_MESSAGE_EXT
+        60 => {
+            let message = unsafe { &*data.cast::<MessageExt>() };
+            let msg = unsafe { CStr::from_ptr(message.msg) };
+            *LAST_MESSAGE.lock().unwrap() = msg.to_string_lossy().into_owned();
+            LAST_MESSAGE_LEVEL.store(message.level, Ordering::SeqCst);
             true
         }
         // SET_GEOMETRY, SET_SYSTEM_AV_INFO, SET_INPUT_DESCRIPTORS, SET_CONTROLLER_INFO,
@@ -1149,6 +1180,31 @@ fn missing_chd_is_not_opened_through_vfs() {
     assert!(!paths.iter().any(|path| path.ends_with("missing.chd")), "opened: {paths:?}");
     let message = LAST_MESSAGE.lock().unwrap().clone();
     assert!(message.contains("not found"), "unexpected: {message}");
+
+    core.unload();
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn missing_bios_is_shown_as_error() {
+    let _lock = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    reset_counters();
+    MESSAGE_INTERFACE_VERSION.store(1, Ordering::SeqCst);
+    LAST_MESSAGE_LEVEL.store(-1, Ordering::SeqCst);
+
+    // The system directory is empty, so the GBA BIOS is missing
+    let dir = temp_dir("missing-bios");
+    let rom_path = dir.join("game.gba");
+    fs::write(&rom_path, vec![0_u8; 0x200]).unwrap();
+
+    let core = Core::load(&dir, &dir);
+    let loaded = core.load_game(&rom_path, None);
+    MESSAGE_INTERFACE_VERSION.store(0, Ordering::SeqCst);
+    assert!(!loaded, "GBA game should not load without a BIOS");
+    let message = LAST_MESSAGE.lock().unwrap().clone();
+    assert!(message.contains("gba_bios.bin"), "unexpected: {message}");
+    // RETRO_LOG_ERROR, via SET_MESSAGE_EXT
+    assert_eq!(LAST_MESSAGE_LEVEL.load(Ordering::SeqCst), 3);
 
     core.unload();
     fs::remove_dir_all(&dir).ok();

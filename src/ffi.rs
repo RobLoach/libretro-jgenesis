@@ -54,6 +54,8 @@ pub const RETRO_ENVIRONMENT_GET_VFS_INTERFACE: c_uint = 0x2D | RETRO_ENVIRONMENT
 pub const RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE: c_uint = 0x2F | RETRO_ENVIRONMENT_EXPERIMENTAL;
 pub const RETRO_ENVIRONMENT_GET_INPUT_BITMASKS: c_uint = 0x33 | RETRO_ENVIRONMENT_EXPERIMENTAL;
 pub const RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION: c_uint = 52;
+pub const RETRO_ENVIRONMENT_GET_MESSAGE_INTERFACE_VERSION: c_uint = 59;
+pub const RETRO_ENVIRONMENT_SET_MESSAGE_EXT: c_uint = 60;
 pub const RETRO_ENVIRONMENT_GET_INPUT_MAX_USERS: c_uint = 61;
 pub const RETRO_ENVIRONMENT_SET_CONTENT_INFO_OVERRIDE: c_uint = 65;
 pub const RETRO_ENVIRONMENT_GET_GAME_INFO_EXT: c_uint = 66;
@@ -88,6 +90,10 @@ pub const RETRO_LOG_DEBUG: c_int = 0;
 pub const RETRO_LOG_INFO: c_int = 1;
 pub const RETRO_LOG_WARN: c_int = 2;
 pub const RETRO_LOG_ERROR: c_int = 3;
+
+pub const RETRO_MESSAGE_TARGET_ALL: c_int = 0;
+
+pub const RETRO_MESSAGE_TYPE_NOTIFICATION: c_int = 0;
 
 pub const RETRO_NUM_CORE_OPTION_VALUES_MAX: usize = 128;
 
@@ -180,6 +186,22 @@ pub struct RetroVariable {
 pub struct RetroMessage {
     pub msg: *const c_char,
     pub frames: c_uint,
+}
+
+#[repr(C)]
+pub struct RetroMessageExt {
+    pub msg: *const c_char,
+    /// Milliseconds
+    pub duration: c_uint,
+    pub priority: c_uint,
+    /// `RETRO_LOG_*`
+    pub level: c_int,
+    /// `RETRO_MESSAGE_TARGET_*`
+    pub target: c_int,
+    /// `RETRO_MESSAGE_TYPE_*`
+    pub type_: c_int,
+    /// Percentage, or -1 for none
+    pub progress: i8,
 }
 
 #[repr(C)]
